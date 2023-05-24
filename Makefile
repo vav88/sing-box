@@ -22,7 +22,7 @@ install:
 fmt:
 	@gofumpt -l -w .
 	@gofmt -s -w .
-	@gci write --custom-order -s "standard,prefix(github.com/sagernet/),default" .
+	@gci write --custom-order -s standard -s "prefix(github.com/sagernet/)" -s "default" .
 
 fmt_install:
 	go install -v mvdan.cc/gofumpt@latest
@@ -77,13 +77,20 @@ test_stdio:
 	go mod tidy && \
 	go test -v -tags "$(TAGS_TEST),force_stdio" .
 
+android:
+	go run ./cmd/internal/build_libbox -target android
+
+ios:
+	go run ./cmd/internal/build_libbox -target ios
+
 lib:
-	go run ./cmd/internal/build_libbox
+	go run ./cmd/internal/build_libbox -target android
+	go run ./cmd/internal/build_libbox -target ios
 
 lib_install:
 	go get -v -d
-	go install -v github.com/sagernet/gomobile/cmd/gomobile@v0.0.0-20221130124640-349ebaa752ca
-	go install -v github.com/sagernet/gomobile/cmd/gobind@v0.0.0-20221130124640-349ebaa752ca
+	go install -v github.com/sagernet/gomobile/cmd/gomobile@v0.0.0-20230413023804-244d7ff07035
+	go install -v github.com/sagernet/gomobile/cmd/gobind@v0.0.0-20230413023804-244d7ff07035
 
 clean:
 	rm -rf bin dist sing-box

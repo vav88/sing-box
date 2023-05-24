@@ -249,6 +249,10 @@ func (c *ClientConn) WriterReplaceable() bool {
 	return c.requestWrite
 }
 
+func (c *ClientConn) NeedAdditionalReadDeadline() bool {
+	return true
+}
+
 func (c *ClientConn) Upstream() any {
 	return c.Conn
 }
@@ -377,6 +381,10 @@ func (c *ClientPacketConn) RemoteAddr() net.Addr {
 	return c.destination.UDPAddr()
 }
 
+func (c *ClientPacketConn) NeedAdditionalReadDeadline() bool {
+	return true
+}
+
 func (c *ClientPacketConn) Upstream() any {
 	return c.ExtendedConn
 }
@@ -413,7 +421,11 @@ func (c *ClientPacketAddrConn) ReadFrom(p []byte) (n int, addr net.Addr, err err
 	if err != nil {
 		return
 	}
-	addr = destination.UDPAddr()
+	if destination.IsFqdn() {
+		addr = destination
+	} else {
+		addr = destination.UDPAddr()
+	}
 	var length uint16
 	err = binary.Read(c.ExtendedConn, binary.BigEndian, &length)
 	if err != nil {
@@ -512,6 +524,10 @@ func (c *ClientPacketAddrConn) LocalAddr() net.Addr {
 
 func (c *ClientPacketAddrConn) FrontHeadroom() int {
 	return 2 + M.MaxSocksaddrLength
+}
+
+func (c *ClientPacketAddrConn) NeedAdditionalReadDeadline() bool {
+	return true
 }
 
 func (c *ClientPacketAddrConn) Upstream() any {

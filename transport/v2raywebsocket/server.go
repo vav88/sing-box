@@ -52,6 +52,9 @@ func NewServer(ctx context.Context, options option.V2RayWebsocketOptions, tlsCon
 		Handler:           server,
 		ReadHeaderTimeout: C.TCPTimeout,
 		MaxHeaderBytes:    http.DefaultMaxHeaderBytes,
+		BaseContext: func(net.Listener) context.Context {
+			return ctx
+		},
 	}
 	return server, nil
 }
@@ -95,7 +98,7 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	wsConn, err := upgrader.Upgrade(writer, request, nil)
 	if err != nil {
-		s.fallbackRequest(request.Context(), writer, request, http.StatusBadRequest, E.Cause(err, "upgrade websocket connection"))
+		s.fallbackRequest(request.Context(), writer, request, 0, E.Cause(err, "upgrade websocket connection"))
 		return
 	}
 	var metadata M.Metadata
@@ -115,7 +118,9 @@ func (s *Server) fallbackRequest(ctx context.Context, writer http.ResponseWriter
 	} else if fErr == os.ErrInvalid {
 		fErr = nil
 	}
-	writer.WriteHeader(statusCode)
+	if statusCode > 0 {
+		writer.WriteHeader(statusCode)
+	}
 	s.handler.NewError(request.Context(), E.Cause(E.Errors(err, E.Cause(fErr, "fallback connection")), "process connection from ", request.RemoteAddr))
 }
 

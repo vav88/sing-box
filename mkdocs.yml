@@ -38,8 +38,8 @@ nav:
   - Installation:
       - From source: installation/from-source.md
       - Clients:
-          - SFI:
-            - installation/clients/sfi/index.md
+          - iOS: installation/clients/sfi.md
+          - Android: installation/clients/sfa.md
   - Configuration:
       - configuration/index.md
       - Log:
@@ -143,6 +143,7 @@ extra:
       link: https://github.com/SagerNet/sing-box
   generator: false
 plugins:
+  - search
   - i18n:
       default_language: en
       languages:

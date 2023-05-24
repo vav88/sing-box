@@ -1,5 +1,3 @@
-//go:build darwin
-
 package libbox
 
 import (
@@ -44,7 +42,7 @@ func (s *CommandServer) handleStatusConn(conn net.Conn) error {
 		}
 		select {
 		case <-ctx.Done():
-			return nil
+			return ctx.Err()
 		case <-ticker.C:
 		}
 	}

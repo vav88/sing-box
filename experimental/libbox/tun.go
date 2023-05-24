@@ -1,5 +1,3 @@
-//go:build linux || darwin
-
 package libbox
 
 import (
@@ -61,7 +59,7 @@ func mapRoutePrefix(prefixes []netip.Prefix) RoutePrefixIterator {
 var _ TunOptions = (*tunOptions)(nil)
 
 type tunOptions struct {
-	tun.Options
+	*tun.Options
 	option.TunPlatformOptions
 }
 

@@ -15,17 +15,18 @@ import (
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/dialer"
+	"github.com/sagernet/sing-box/common/dialer/conntrack"
 	"github.com/sagernet/sing-box/common/geoip"
 	"github.com/sagernet/sing-box/common/geosite"
 	"github.com/sagernet/sing-box/common/mux"
 	"github.com/sagernet/sing-box/common/process"
 	"github.com/sagernet/sing-box/common/sniff"
-	"github.com/sagernet/sing-box/common/warning"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/experimental/libbox/platform"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/ntp"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-box/outbound"
 	"github.com/sagernet/sing-dns"
 	"github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing-vmess"
@@ -39,27 +40,6 @@ import (
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/rw"
 	"github.com/sagernet/sing/common/uot"
-)
-
-var warnDefaultInterfaceOnUnsupportedPlatform = warning.New(
-	func() bool {
-		return !(C.IsLinux || C.IsWindows || C.IsDarwin)
-	},
-	"route option `default_mark` is only supported on Linux and Windows",
-)
-
-var warnDefaultMarkOnNonLinux = warning.New(
-	func() bool {
-		return !C.IsLinux
-	},
-	"route option `default_mark` is only supported on Linux",
-)
-
-var warnFindProcessOnUnsupportedPlatform = warning.New(
-	func() bool {
-		return !(C.IsLinux || C.IsWindows || C.IsDarwin)
-	},
-	"route option `find_process` is only supported on Linux, Windows, and macOS",
 )
 
 var _ adapter.Router = (*Router)(nil)
@@ -112,16 +92,6 @@ func NewRouter(
 	inbounds []option.Inbound,
 	platformInterface platform.Interface,
 ) (*Router, error) {
-	if options.DefaultInterface != "" {
-		warnDefaultInterfaceOnUnsupportedPlatform.Check()
-	}
-	if options.DefaultMark != 0 {
-		warnDefaultMarkOnNonLinux.Check()
-	}
-	if options.FindProcess {
-		warnFindProcessOnUnsupportedPlatform.Check()
-	}
-
 	router := &Router{
 		ctx:                   ctx,
 		logger:                logFactory.NewLogger("router"),
@@ -218,7 +188,7 @@ func NewRouter(
 					}
 				}
 			}
-			transport, err := dns.CreateTransport(ctx, logFactory.NewLogger(F.ToString("dns/transport[", tag, "]")), detour, server.Address)
+			transport, err := dns.CreateTransport(tag, ctx, logFactory.NewLogger(F.ToString("dns/transport[", tag, "]")), detour, server.Address)
 			if err != nil {
 				return nil, E.Cause(err, "parse dns server[", tag, "]")
 			}
@@ -258,7 +228,7 @@ func NewRouter(
 	}
 	if defaultTransport == nil {
 		if len(transports) == 0 {
-			transports = append(transports, dns.NewLocalTransport(N.SystemDialer))
+			transports = append(transports, dns.NewLocalTransport("local", N.SystemDialer))
 		}
 		defaultTransport = transports[0]
 	}
@@ -267,27 +237,34 @@ func NewRouter(
 	router.transportMap = transportMap
 	router.transportDomainStrategy = transportDomainStrategy
 
-	needInterfaceMonitor := platformInterface == nil && (options.AutoDetectInterface || common.Any(inbounds, func(inbound option.Inbound) bool {
+	usePlatformDefaultInterfaceMonitor := platformInterface != nil && platformInterface.UsePlatformDefaultInterfaceMonitor()
+	needInterfaceMonitor := options.AutoDetectInterface || common.Any(inbounds, func(inbound option.Inbound) bool {
 		return inbound.HTTPOptions.SetSystemProxy || inbound.MixedOptions.SetSystemProxy || inbound.TunOptions.AutoRoute
-	}))
+	})
 
 	if needInterfaceMonitor {
-		networkMonitor, err := tun.NewNetworkUpdateMonitor(router)
-		if err == nil {
-			router.networkMonitor = networkMonitor
-			networkMonitor.RegisterCallback(router.interfaceFinder.update)
+		if !usePlatformDefaultInterfaceMonitor {
+			networkMonitor, err := tun.NewNetworkUpdateMonitor(router)
+			if err != os.ErrInvalid {
+				if err != nil {
+					return nil, err
+				}
+				router.networkMonitor = networkMonitor
+				networkMonitor.RegisterCallback(router.interfaceFinder.update)
+				interfaceMonitor, err := tun.NewDefaultInterfaceMonitor(router.networkMonitor, tun.DefaultInterfaceMonitorOptions{
+					OverrideAndroidVPN: options.OverrideAndroidVPN,
+				})
+				if err != nil {
+					return nil, E.New("auto_detect_interface unsupported on current platform")
+				}
+				interfaceMonitor.RegisterCallback(router.notifyNetworkUpdate)
+				router.interfaceMonitor = interfaceMonitor
+			}
+		} else {
+			interfaceMonitor := platformInterface.CreateDefaultInterfaceMonitor(router)
+			interfaceMonitor.RegisterCallback(router.notifyNetworkUpdate)
+			router.interfaceMonitor = interfaceMonitor
 		}
-	}
-
-	if router.networkMonitor != nil && needInterfaceMonitor {
-		interfaceMonitor, err := tun.NewDefaultInterfaceMonitor(router.networkMonitor, tun.DefaultInterfaceMonitorOptions{
-			OverrideAndroidVPN: options.OverrideAndroidVPN,
-		})
-		if err != nil {
-			return nil, E.New("auto_detect_interface unsupported on current platform")
-		}
-		interfaceMonitor.RegisterCallback(router.notifyNetworkUpdate)
-		router.interfaceMonitor = interfaceMonitor
 	}
 
 	needFindProcess := hasRule(options.Rules, isProcessRule) || hasDNSRule(dnsOptions.Rules, isProcessDNSRule) || options.FindProcess
@@ -489,31 +466,56 @@ func (r *Router) Start() error {
 }
 
 func (r *Router) Close() error {
-	for _, rule := range r.rules {
-		err := rule.Close()
-		if err != nil {
-			return err
-		}
+	var err error
+	for i, rule := range r.rules {
+		r.logger.Trace("closing rule[", i, "]")
+		err = E.Append(err, rule.Close(), func(err error) error {
+			return E.Cause(err, "close rule[", i, "]")
+		})
 	}
-	for _, rule := range r.dnsRules {
-		err := rule.Close()
-		if err != nil {
-			return err
-		}
+	for i, rule := range r.dnsRules {
+		r.logger.Trace("closing dns rule[", i, "]")
+		err = E.Append(err, rule.Close(), func(err error) error {
+			return E.Cause(err, "close dns rule[", i, "]")
+		})
 	}
-	for _, transport := range r.transports {
-		err := transport.Close()
-		if err != nil {
-			return err
-		}
+	for i, transport := range r.transports {
+		r.logger.Trace("closing transport[", i, "] ")
+		err = E.Append(err, transport.Close(), func(err error) error {
+			return E.Cause(err, "close dns transport[", i, "]")
+		})
 	}
-	return common.Close(
-		common.PtrOrNil(r.geoIPReader),
-		r.interfaceMonitor,
-		r.networkMonitor,
-		r.packageManager,
-		r.timeService,
-	)
+	if r.geositeReader != nil {
+		r.logger.Trace("closing geoip reader")
+		err = E.Append(err, common.Close(r.geoIPReader), func(err error) error {
+			return E.Cause(err, "close geoip reader")
+		})
+	}
+	if r.interfaceMonitor != nil {
+		r.logger.Trace("closing interface monitor")
+		err = E.Append(err, r.interfaceMonitor.Close(), func(err error) error {
+			return E.Cause(err, "close interface monitor")
+		})
+	}
+	if r.networkMonitor != nil {
+		r.logger.Trace("closing network monitor")
+		err = E.Append(err, r.networkMonitor.Close(), func(err error) error {
+			return E.Cause(err, "close network monitor")
+		})
+	}
+	if r.packageManager != nil {
+		r.logger.Trace("closing package manager")
+		err = E.Append(err, r.packageManager.Close(), func(err error) error {
+			return E.Cause(err, "close package manager")
+		})
+	}
+	if r.timeService != nil {
+		r.logger.Trace("closing time service")
+		err = E.Append(err, r.timeService.Close(), func(err error) error {
+			return E.Cause(err, "close time service")
+		})
+	}
+	return err
 }
 
 func (r *Router) GeoIPReader() *geoip.Reader {
@@ -605,7 +607,7 @@ func (r *Router) RouteConnection(ctx context.Context, conn net.Conn, metadata ad
 	if metadata.InboundOptions.SniffEnabled {
 		buffer := buf.NewPacket()
 		buffer.FullReset()
-		sniffMetadata, _ := sniff.PeekStream(ctx, conn, buffer, time.Duration(metadata.InboundOptions.SniffTimeout), sniff.StreamDomainNameQuery, sniff.TLSClientHello, sniff.HTTPHost)
+		sniffMetadata, err := sniff.PeekStream(ctx, conn, buffer, time.Duration(metadata.InboundOptions.SniffTimeout), sniff.StreamDomainNameQuery, sniff.TLSClientHello, sniff.HTTPHost)
 		if sniffMetadata != nil {
 			metadata.Protocol = sniffMetadata.Protocol
 			metadata.Domain = sniffMetadata.Domain
@@ -620,6 +622,8 @@ func (r *Router) RouteConnection(ctx context.Context, conn net.Conn, metadata ad
 			} else {
 				r.logger.DebugContext(ctx, "sniffed protocol: ", metadata.Protocol)
 			}
+		} else if err != nil {
+			r.logger.TraceContext(ctx, "sniffed no protocol: ", err)
 		}
 		if !buffer.IsEmpty() {
 			conn = bufio.NewCachedConn(conn, buffer)
@@ -635,9 +639,11 @@ func (r *Router) RouteConnection(ctx context.Context, conn net.Conn, metadata ad
 		metadata.DestinationAddresses = addresses
 		r.dnsLogger.DebugContext(ctx, "resolved [", strings.Join(F.MapToString(metadata.DestinationAddresses), " "), "]")
 	}
-	matchedRule, detour := r.match(ctx, &metadata, r.defaultOutboundForConnection)
+	ctx, matchedRule, detour, err := r.match(ctx, &metadata, r.defaultOutboundForConnection)
+	if err != nil {
+		return err
+	}
 	if !common.Contains(detour.Network(), N.NetworkTCP) {
-		conn.Close()
 		return E.New("missing supported outbound, closing connection")
 	}
 	if r.clashServer != nil {
@@ -713,9 +719,11 @@ func (r *Router) RoutePacketConnection(ctx context.Context, conn N.PacketConn, m
 		metadata.DestinationAddresses = addresses
 		r.dnsLogger.DebugContext(ctx, "resolved [", strings.Join(F.MapToString(metadata.DestinationAddresses), " "), "]")
 	}
-	matchedRule, detour := r.match(ctx, &metadata, r.defaultOutboundForPacketConnection)
+	ctx, matchedRule, detour, err := r.match(ctx, &metadata, r.defaultOutboundForPacketConnection)
+	if err != nil {
+		return err
+	}
 	if !common.Contains(detour.Network(), N.NetworkUDP) {
-		conn.Close()
 		return E.New("missing supported outbound, closing packet connection")
 	}
 	if r.clashServer != nil {
@@ -731,7 +739,18 @@ func (r *Router) RoutePacketConnection(ctx context.Context, conn N.PacketConn, m
 	return detour.NewPacketConnection(ctx, conn, metadata)
 }
 
-func (r *Router) match(ctx context.Context, metadata *adapter.InboundContext, defaultOutbound adapter.Outbound) (adapter.Rule, adapter.Outbound) {
+func (r *Router) match(ctx context.Context, metadata *adapter.InboundContext, defaultOutbound adapter.Outbound) (context.Context, adapter.Rule, adapter.Outbound, error) {
+	matchRule, matchOutbound := r.match0(ctx, metadata, defaultOutbound)
+	if contextOutbound, loaded := outbound.TagFromContext(ctx); loaded {
+		if contextOutbound == matchOutbound.Tag() {
+			return nil, nil, nil, E.New("connection loopback in outbound/", matchOutbound.Type(), "[", matchOutbound.Tag(), "]")
+		}
+	}
+	ctx = outbound.ContextWithTag(ctx, matchOutbound.Tag())
+	return ctx, matchRule, matchOutbound, nil
+}
+
+func (r *Router) match0(ctx context.Context, metadata *adapter.InboundContext, defaultOutbound adapter.Outbound) (adapter.Rule, adapter.Outbound) {
 	if r.processSearcher != nil {
 		var originDestination netip.AddrPort
 		if metadata.OriginDestination.IsValid() {
@@ -780,12 +799,31 @@ func (r *Router) InterfaceFinder() control.InterfaceFinder {
 	return &r.interfaceFinder
 }
 
+func (r *Router) UpdateInterfaces() error {
+	if r.platformInterface == nil || !r.platformInterface.UsePlatformInterfaceGetter() {
+		return r.interfaceFinder.update()
+	} else {
+		interfaces, err := r.platformInterface.Interfaces()
+		if err != nil {
+			return err
+		}
+		r.interfaceFinder.updateInterfaces(common.Map(interfaces, func(it platform.NetworkInterface) net.Interface {
+			return net.Interface{
+				Name:  it.Name,
+				Index: it.Index,
+				MTU:   it.MTU,
+			}
+		}))
+		return nil
+	}
+}
+
 func (r *Router) AutoDetectInterface() bool {
 	return r.autoDetectInterface
 }
 
 func (r *Router) AutoDetectInterfaceFunc() control.Func {
-	if r.platformInterface != nil {
+	if r.platformInterface != nil && r.platformInterface.UsePlatformAutoDetectInterfaceControl() {
 		return r.platformInterface.AutoDetectInterfaceControl()
 	} else {
 		return control.BindToInterfaceFunc(r.InterfaceFinder(), func(network string, address string) (interfaceName string, interfaceIndex int) {
@@ -1093,7 +1131,7 @@ func (r *Router) NewError(ctx context.Context, err error) {
 }
 
 func (r *Router) notifyNetworkUpdate(int) error {
-	if C.IsAndroid {
+	if C.IsAndroid && r.platformInterface == nil {
 		var vpnStatus string
 		if r.interfaceMonitor.AndroidVPNEnabled() {
 			vpnStatus = "enabled"
@@ -1103,6 +1141,10 @@ func (r *Router) notifyNetworkUpdate(int) error {
 		r.logger.Info("updated default interface ", r.interfaceMonitor.DefaultInterfaceName(netip.IPv4Unspecified()), ", index ", r.interfaceMonitor.DefaultInterfaceIndex(netip.IPv4Unspecified()), ", vpn ", vpnStatus)
 	} else {
 		r.logger.Info("updated default interface ", r.interfaceMonitor.DefaultInterfaceName(netip.IPv4Unspecified()), ", index ", r.interfaceMonitor.DefaultInterfaceIndex(netip.IPv4Unspecified()))
+	}
+
+	if conntrack.Enabled {
+		conntrack.Close()
 	}
 
 	for _, outbound := range r.outbounds {

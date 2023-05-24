@@ -498,7 +498,12 @@ func (c *PacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
 		return
 	}
 	n = copy(p, msg.Data)
-	addr = M.ParseSocksaddrHostPort(msg.Host, msg.Port).UDPAddr()
+	destination := M.ParseSocksaddrHostPort(msg.Host, msg.Port)
+	if destination.IsFqdn() {
+		addr = destination
+	} else {
+		addr = destination.UDPAddr()
+	}
 	return
 }
 
@@ -528,6 +533,10 @@ func (c *PacketConn) SetReadDeadline(t time.Time) error {
 
 func (c *PacketConn) SetWriteDeadline(t time.Time) error {
 	return os.ErrInvalid
+}
+
+func (c *PacketConn) NeedAdditionalReadDeadline() bool {
+	return true
 }
 
 func (c *PacketConn) Read(b []byte) (n int, err error) {
