@@ -14,6 +14,7 @@ V2Ray Transport 是 v2ray 发明的一组私有协议，并污染了其他协议
 * WebSocket
 * QUIC
 * gRPC
+* HTTPUpgrade
 
 !!! warning "与 v2ray-core 的区别"
 
@@ -47,25 +48,30 @@ V2Ray Transport 是 v2ray 发明的一组私有协议，并污染了其他协议
 
 主机域名列表。
 
-客户端将随机选择，默认服务器将验证。
+如果设置，客户端将随机选择，服务器将验证。
 
 #### path
 
+!!! warning
+
+    V2Ray 文档称服务端和客户端的路径必须一致，但实际代码允许客户端向路径添加任何后缀。
+    sing-box 使用与 V2Ray 相同的行为，但请注意，该行为在 `WebSocket` 和 `HTTPUpgrade` 传输层中不存在。
+
 HTTP 请求路径
 
-默认服务器将验证。
+服务器将验证。
 
 #### method
 
 HTTP 请求方法
 
-默认服务器将验证。
+如果设置，服务器将验证。
 
 #### headers
 
 HTTP 请求的额外标头
 
-默认服务器将写入响应。
+如果设置，服务器将写入响应。
 
 #### idle_timeout
 
@@ -101,11 +107,13 @@ HTTP 请求的额外标头
 
 HTTP 请求路径
 
-默认服务器将验证。
+服务器将验证。
 
 #### headers
 
-HTTP 请求的额外标头。
+HTTP 请求的额外标头
+
+如果设置，服务器将写入响应。
 
 #### max_early_data
 
@@ -127,10 +135,6 @@ HTTP 请求的额外标头。
 }
 ```
 
-!!! warning ""
-
-    默认安装不包含 QUIC, 参阅 [安装](/zh/#_2)。
-
 !!! warning "与 v2ray-core 的区别"
 
     没有额外的加密支持：
@@ -140,7 +144,7 @@ HTTP 请求的额外标头。
 
 !!! note ""
 
-    默认安装不包含标准 gRPC (兼容性好，但性能较差), 参阅 [安装](/zh/#_2)。
+    默认安装不包含标准 gRPC (兼容性好，但性能较差), 参阅 [安装](/zh/installation/build-from-source/#_5)。
 
 ```json
 {
@@ -183,3 +187,32 @@ gRPC 服务名称。
 如果启用，客户端传输即使没有活动连接也会发送 keepalive ping。如果禁用，则在没有活动连接时，将忽略 `idle_timeout` 和 `ping_timeout`，并且不会发送 keepalive ping。
 
 默认禁用。
+
+### HTTPUpgrade
+
+```json
+{
+  "type": "httpupgrade",
+  "host": "",
+  "path": "",
+  "headers": {}
+}
+```
+
+#### host
+
+主机域名。
+
+服务器将验证。
+
+#### path
+
+HTTP 请求路径
+
+服务器将验证。
+
+#### headers
+
+HTTP 请求的额外标头。
+
+如果设置，服务器将写入响应。

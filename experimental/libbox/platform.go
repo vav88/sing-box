@@ -18,6 +18,10 @@ type PlatformInterface interface {
 	CloseDefaultInterfaceMonitor(listener InterfaceUpdateListener) error
 	UsePlatformInterfaceGetter() bool
 	GetInterfaces() (NetworkInterfaceIterator, error)
+	UnderNetworkExtension() bool
+	IncludeAllNetworks() bool
+	ReadWIFIState() *WIFIState
+	ClearDNSCache()
 }
 
 type TunInterface interface {
@@ -34,6 +38,15 @@ type NetworkInterface struct {
 	MTU       int32
 	Name      string
 	Addresses StringIterator
+}
+
+type WIFIState struct {
+	SSID  string
+	BSSID string
+}
+
+func NewWIFIState(wifiSSID string, wifiBSSID string) *WIFIState {
+	return &WIFIState{wifiSSID, wifiBSSID}
 }
 
 type NetworkInterfaceIterator interface {

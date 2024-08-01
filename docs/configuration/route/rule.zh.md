@@ -1,3 +1,13 @@
+!!! quote "sing-box 1.8.0 中的更改"
+
+    :material-plus: [rule_set](#rule_set)  
+    :material-plus: [rule_set_ipcidr_match_source](#rule_set_ipcidr_match_source)  
+    :material-plus: [source_ip_is_private](#source_ip_is_private)  
+    :material-plus: [ip_is_private](#ip_is_private)  
+    :material-delete-clock: [source_geoip](#source_geoip)  
+    :material-delete-clock: [geoip](#geoip)  
+    :material-delete-clock: [geosite](#geosite)
+
 ### 结构
 
 ```json
@@ -9,7 +19,9 @@
           "mixed-in"
         ],
         "ip_version": 6,
-        "network": "tcp",
+        "network": [
+          "tcp"
+        ],
         "auth_user": [
           "usera",
           "userb"
@@ -43,9 +55,11 @@
         "source_ip_cidr": [
           "10.0.0.0/24"
         ],
+        "source_ip_is_private": false,
         "ip_cidr": [
           "10.0.0.0/24"
         ],
+        "ip_is_private": false,
         "source_port": [
           12345
         ],
@@ -79,6 +93,17 @@
           1000
         ],
         "clash_mode": "direct",
+        "wifi_ssid": [
+          "My WIFI"
+        ],
+        "wifi_bssid": [
+          "00:00:00:00:00:00"
+        ],
+        "rule_set": [
+          "geoip-cn",
+          "geosite-cn"
+        ],
+        "rule_set_ipcidr_match_source": false,
         "invert": false,
         "outbound": "direct"
       },
@@ -104,15 +129,17 @@
 !!! note ""
 
     默认规则使用以下匹配逻辑:  
-    (`domain` || `domain_suffix` || `domain_keyword` || `domain_regex` || `geosite` || `geoip` || `ip_cidr`) &&  
+    (`domain` || `domain_suffix` || `domain_keyword` || `domain_regex` || `geosite` || `geoip` || `ip_cidr` || `ip_is_private`) &&  
     (`port` || `port_range`) &&  
-    (`source_geoip` || `source_ip_cidr`) &&  
+    (`source_geoip` || `source_ip_cidr` || `source_ip_is_private`) &&  
     (`source_port` || `source_port_range`) &&  
     `other fields`
 
+    另外，引用的规则集可视为被合并，而不是作为一个单独的规则子项。
+
 #### inbound
 
-[入站](/zh/configuration/inbound) 标签。
+[入站](/zh/configuration/inbound/) 标签。
 
 #### ip_version
 
@@ -150,13 +177,25 @@
 
 #### geosite
 
-匹配 GeoSite。
+!!! failure "已在 sing-box 1.8.0 废弃"
+
+    Geosite 已废弃且可能在不久的将来移除，参阅 [迁移指南](/zh/migration/#geosite)。
+
+匹配 Geosite。
 
 #### source_geoip
+
+!!! failure "已在 sing-box 1.8.0 废弃"
+
+    GeoIP 已废弃且可能在不久的将来移除，参阅 [迁移指南](/zh/migration/#geoip)。
 
 匹配源 GeoIP。
 
 #### geoip
+
+!!! failure "已在 sing-box 1.8.0 废弃"
+
+    GeoIP 已废弃且可能在不久的将来移除，参阅 [迁移指南](/zh/migration/#geoip)。
 
 匹配 GeoIP。
 
@@ -164,9 +203,21 @@
 
 匹配源 IP CIDR。
 
+#### source_ip_is_private
+
+!!! question "自 sing-box 1.8.0 起"
+
+匹配非公开源 IP。
+
 #### ip_cidr
 
 匹配 IP CIDR。
+
+#### ip_is_private
+
+!!! question "自 sing-box 1.8.0 起"
+
+匹配非公开 IP。
 
 #### source_port
 
@@ -186,7 +237,7 @@
 
 #### process_name
 
-!!! error ""
+!!! quote ""
 
     仅支持 Linux、Windows 和 macOS。
 
@@ -194,7 +245,7 @@
 
 #### process_path
 
-!!! error ""
+!!! quote ""
 
     仅支持 Linux、Windows 和 macOS.
 
@@ -206,7 +257,7 @@
 
 #### user
 
-!!! error ""
+!!! quote ""
 
     仅支持 Linux.
 
@@ -214,7 +265,7 @@
 
 #### user_id
 
-!!! error ""
+!!! quote ""
 
     仅支持 Linux.
 
@@ -223,6 +274,34 @@
 #### clash_mode
 
 匹配 Clash 模式。
+
+#### wifi_ssid
+
+!!! quote ""
+
+    仅在 Android 与 Apple 平台图形客户端中支持。
+
+匹配 WiFi SSID。
+
+#### wifi_bssid
+
+!!! quote ""
+
+    仅在 Android 与 Apple 平台图形客户端中支持。
+
+匹配 WiFi BSSID。
+
+#### rule_set
+
+!!! question "自 sing-box 1.8.0 起"
+
+匹配[规则集](/zh/configuration/route/#rule_set)。
+
+#### rule_set_ipcidr_match_source
+
+!!! question "自 sing-box 1.8.0 起"
+
+使规则集中的 `ipcidr` 规则匹配源 IP。
 
 #### invert
 
@@ -242,18 +321,12 @@
 
 #### mode
 
+==必填==
+
 `and` 或 `or`
 
 #### rules
 
-包括的默认规则。
-
-#### invert
-
-反选匹配结果。
-
-#### outbound
-
 ==必填==
 
-目标出站的标签。
+包括的规则。

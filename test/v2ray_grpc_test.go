@@ -41,11 +41,13 @@ func testV2RayGRPCInbound(t *testing.T, forceLite bool) {
 							UUID: userId.String(),
 						},
 					},
-					TLS: &option.InboundTLSOptions{
-						Enabled:         true,
-						ServerName:      "example.org",
-						CertificatePath: certPem,
-						KeyPath:         keyPem,
+					InboundTLSOptionsContainer: option.InboundTLSOptionsContainer{
+						TLS: &option.InboundTLSOptions{
+							Enabled:         true,
+							ServerName:      "example.org",
+							CertificatePath: certPem,
+							KeyPath:         keyPem,
+						},
 					},
 					Transport: &option.V2RayTransportOptions{
 						Type: C.V2RayTransportTypeGRPC,
@@ -75,6 +77,7 @@ func testV2RayGRPCInbound(t *testing.T, forceLite bool) {
 		Image:      ImageV2RayCore,
 		Ports:      []uint16{serverPort, testPort},
 		EntryPoint: "v2ray",
+		Cmd:        []string{"run"},
 		Stdin:      content,
 		Bind: map[string]string{
 			certPem: "/path/to/certificate.crt",
@@ -114,6 +117,7 @@ func testV2RayGRPCOutbound(t *testing.T, forceLite bool) {
 		Image:      ImageV2RayCore,
 		Ports:      []uint16{serverPort, testPort},
 		EntryPoint: "v2ray",
+		Cmd:        []string{"run"},
 		Stdin:      content,
 		Env:        []string{"V2RAY_VMESS_AEAD_FORCED=false"},
 		Bind: map[string]string{
@@ -145,10 +149,12 @@ func testV2RayGRPCOutbound(t *testing.T, forceLite bool) {
 					},
 					UUID:     userId.String(),
 					Security: "zero",
-					TLS: &option.OutboundTLSOptions{
-						Enabled:         true,
-						ServerName:      "example.org",
-						CertificatePath: certPem,
+					OutboundTLSOptionsContainer: option.OutboundTLSOptionsContainer{
+						TLS: &option.OutboundTLSOptions{
+							Enabled:         true,
+							ServerName:      "example.org",
+							CertificatePath: certPem,
+						},
 					},
 					Transport: &option.V2RayTransportOptions{
 						Type: C.V2RayTransportTypeGRPC,

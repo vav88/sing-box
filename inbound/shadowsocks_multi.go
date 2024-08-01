@@ -4,11 +4,16 @@ import (
 	"context"
 	"net"
 	"os"
+	"time"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/mux"
+	"github.com/sagernet/sing-box/common/uot"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-shadowsocks"
+	"github.com/sagernet/sing-shadowsocks/shadowaead"
 	"github.com/sagernet/sing-shadowsocks/shadowaead_2022"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/auth"
@@ -16,6 +21,7 @@ import (
 	E "github.com/sagernet/sing/common/exceptions"
 	F "github.com/sagernet/sing/common/format"
 	N "github.com/sagernet/sing/common/network"
+	"github.com/sagernet/sing/common/ntp"
 )
 
 var (
@@ -25,7 +31,7 @@ var (
 
 type ShadowsocksMulti struct {
 	myInboundAdapter
-	service *shadowaead_2022.MultiService[int]
+	service shadowsocks.MultiService[int]
 	users   []option.ShadowsocksUser
 }
 
@@ -35,7 +41,7 @@ func newShadowsocksMulti(ctx context.Context, router adapter.Router, logger log.
 			protocol:      C.TypeShadowsocks,
 			network:       options.Network.Build(),
 			ctx:           ctx,
-			router:        router,
+			router:        uot.NewRouter(router, logger),
 			logger:        logger,
 			tag:           tag,
 			listenOptions: options.ListenOptions,
@@ -43,22 +49,34 @@ func newShadowsocksMulti(ctx context.Context, router adapter.Router, logger log.
 	}
 	inbound.connHandler = inbound
 	inbound.packetHandler = inbound
-	var udpTimeout int64
-	if options.UDPTimeout != 0 {
-		udpTimeout = options.UDPTimeout
-	} else {
-		udpTimeout = int64(C.UDPTimeout.Seconds())
+	var err error
+	inbound.router, err = mux.NewRouterWithOptions(inbound.router, logger, common.PtrValueOrDefault(options.Multiplex))
+	if err != nil {
+		return nil, err
 	}
-	if !common.Contains(shadowaead_2022.List, options.Method) {
+	var udpTimeout time.Duration
+	if options.UDPTimeout != 0 {
+		udpTimeout = time.Duration(options.UDPTimeout)
+	} else {
+		udpTimeout = C.UDPTimeout
+	}
+	var service shadowsocks.MultiService[int]
+	if common.Contains(shadowaead_2022.List, options.Method) {
+		service, err = shadowaead_2022.NewMultiServiceWithPassword[int](
+			options.Method,
+			options.Password,
+			int64(udpTimeout.Seconds()),
+			adapter.NewUpstreamContextHandler(inbound.newConnection, inbound.newPacketConnection, inbound),
+			ntp.TimeFuncFromContext(ctx),
+		)
+	} else if common.Contains(shadowaead.List, options.Method) {
+		service, err = shadowaead.NewMultiService[int](
+			options.Method,
+			int64(udpTimeout.Seconds()),
+			adapter.NewUpstreamContextHandler(inbound.newConnection, inbound.newPacketConnection, inbound))
+	} else {
 		return nil, E.New("unsupported method: " + options.Method)
 	}
-	service, err := shadowaead_2022.NewMultiServiceWithPassword[int](
-		options.Method,
-		options.Password,
-		udpTimeout,
-		adapter.NewUpstreamContextHandler(inbound.newConnection, inbound.newPacketConnection, inbound),
-		router.TimeFunc(),
-	)
 	if err != nil {
 		return nil, err
 	}

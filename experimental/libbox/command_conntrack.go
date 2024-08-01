@@ -6,11 +6,11 @@ import (
 	runtimeDebug "runtime/debug"
 	"time"
 
-	"github.com/sagernet/sing-box/common/dialer/conntrack"
+	"github.com/sagernet/sing-box/common/conntrack"
 )
 
-func ClientCloseConnections(sharedDirectory string) error {
-	conn, err := clientConnect(sharedDirectory)
+func (c *CommandClient) CloseConnections() error {
+	conn, err := c.directConnect()
 	if err != nil {
 		return err
 	}

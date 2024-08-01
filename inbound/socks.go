@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/uot"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
@@ -21,16 +22,16 @@ var (
 
 type Socks struct {
 	myInboundAdapter
-	authenticator auth.Authenticator
+	authenticator *auth.Authenticator
 }
 
 func NewSocks(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.SocksInboundOptions) *Socks {
 	inbound := &Socks{
 		myInboundAdapter{
-			protocol:      C.TypeSocks,
+			protocol:      C.TypeSOCKS,
 			network:       []string{N.NetworkTCP},
 			ctx:           ctx,
-			router:        router,
+			router:        uot.NewRouter(router, logger),
 			logger:        logger,
 			tag:           tag,
 			listenOptions: options.ListenOptions,

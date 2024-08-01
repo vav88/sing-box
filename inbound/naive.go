@@ -2,7 +2,6 @@ package inbound
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/binary"
 	"io"
 	"math/rand"
@@ -14,8 +13,8 @@ import (
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/tls"
+	"github.com/sagernet/sing-box/common/uot"
 	C "github.com/sagernet/sing-box/constant"
-	"github.com/sagernet/sing-box/include"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common"
@@ -32,7 +31,7 @@ var _ adapter.Inbound = (*Naive)(nil)
 
 type Naive struct {
 	myInboundAdapter
-	authenticator auth.Authenticator
+	authenticator *auth.Authenticator
 	tlsConfig     tls.ServerConfig
 	httpServer    *http.Server
 	h3Server      any
@@ -44,7 +43,7 @@ func NewNaive(ctx context.Context, router adapter.Router, logger log.ContextLogg
 			protocol:      C.TypeNaive,
 			network:       options.Network.Build(),
 			ctx:           ctx,
-			router:        router,
+			router:        uot.NewRouter(router, logger),
 			logger:        logger,
 			tag:           tag,
 			listenOptions: options.ListenOptions,
@@ -60,7 +59,7 @@ func NewNaive(ctx context.Context, router adapter.Router, logger log.ContextLogg
 		return nil, E.New("missing users")
 	}
 	if options.TLS != nil {
-		tlsConfig, err := tls.NewServer(ctx, router, logger, common.PtrValueOrDefault(options.TLS))
+		tlsConfig, err := tls.NewServer(ctx, logger, common.PtrValueOrDefault(options.TLS))
 		if err != nil {
 			return nil, err
 		}
@@ -109,8 +108,8 @@ func (n *Naive) Start() error {
 
 	if common.Contains(n.network, N.NetworkUDP) {
 		err := n.configureHTTP3Listener()
-		if !include.WithQUIC && len(n.network) > 1 {
-			log.Warn(E.Cause(err, "naive http3 disabled"))
+		if !C.WithQUIC && len(n.network) > 1 {
+			n.logger.Warn(E.Cause(err, "naive http3 disabled"))
 		} else if err != nil {
 			return err
 		}
@@ -139,14 +138,9 @@ func (n *Naive) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		n.badRequest(ctx, request, E.New("missing naive padding"))
 		return
 	}
-	var authOk bool
-	var userName string
-	authorization := request.Header.Get("Proxy-Authorization")
-	if strings.HasPrefix(authorization, "BASIC ") || strings.HasPrefix(authorization, "Basic ") {
-		userPassword, _ := base64.URLEncoding.DecodeString(authorization[6:])
-		userPswdArr := strings.SplitN(string(userPassword), ":", 2)
-		userName = userPswdArr[0]
-		authOk = n.authenticator.Verify(userPswdArr[0], userPswdArr[1])
+	userName, password, authOk := sHttp.ParseBasicAuth(request.Header.Get("Proxy-Authorization"))
+	if authOk {
+		authOk = n.authenticator.Verify(userName, password)
 	}
 	if !authOk {
 		rejectHTTP(writer, http.StatusProxyAuthRequired)
@@ -270,9 +264,7 @@ func (c *naiveH1Conn) read(p []byte) (n int, err error) {
 		if len(p) >= 3 {
 			paddingHdr = p[:3]
 		} else {
-			_paddingHdr := make([]byte, 3)
-			defer common.KeepAlive(_paddingHdr)
-			paddingHdr = common.Dup(_paddingHdr)
+			paddingHdr = make([]byte, 3)
 		}
 		_, err = io.ReadFull(c.Conn, paddingHdr)
 		if err != nil {
@@ -320,9 +312,7 @@ func (c *naiveH1Conn) write(p []byte) (n int, err error) {
 	if c.writePadding < kFirstPaddings {
 		paddingSize := rand.Intn(256)
 
-		_buffer := buf.StackNewSize(3 + len(p) + paddingSize)
-		defer common.KeepAlive(_buffer)
-		buffer := common.Dup(_buffer)
+		buffer := buf.NewSize(3 + len(p) + paddingSize)
 		defer buffer.Release()
 		header := buffer.Extend(3)
 		binary.BigEndian.PutUint16(header, uint16(len(p)))
@@ -449,9 +439,7 @@ func (c *naiveH2Conn) read(p []byte) (n int, err error) {
 		if len(p) >= 3 {
 			paddingHdr = p[:3]
 		} else {
-			_paddingHdr := make([]byte, 3)
-			defer common.KeepAlive(_paddingHdr)
-			paddingHdr = common.Dup(_paddingHdr)
+			paddingHdr = make([]byte, 3)
 		}
 		_, err = io.ReadFull(c.reader, paddingHdr)
 		if err != nil {
@@ -502,9 +490,7 @@ func (c *naiveH2Conn) write(p []byte) (n int, err error) {
 	if c.writePadding < kFirstPaddings {
 		paddingSize := rand.Intn(256)
 
-		_buffer := buf.StackNewSize(3 + len(p) + paddingSize)
-		defer common.KeepAlive(_buffer)
-		buffer := common.Dup(_buffer)
+		buffer := buf.NewSize(3 + len(p) + paddingSize)
 		defer buffer.Release()
 		header := buffer.Extend(3)
 		binary.BigEndian.PutUint16(header, uint16(len(p)))
@@ -590,7 +576,7 @@ func (c *naiveH2Conn) Close() error {
 }
 
 func (c *naiveH2Conn) LocalAddr() net.Addr {
-	return nil
+	return M.Socksaddr{}
 }
 
 func (c *naiveH2Conn) RemoteAddr() net.Addr {

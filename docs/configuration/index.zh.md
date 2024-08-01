@@ -17,23 +17,29 @@ sing-box 使用 JSON 作为配置文件格式。
 
 ### 字段
 
-| Key            | Format                |
-|----------------|-----------------------|
-| `log`          | [日志](./log)           |
-| `dns`          | [DNS](./dns)          |
-| `inbounds`     | [入站](./inbound)       |
-| `outbounds`    | [出站](./outbound)      |
-| `route`        | [路由](./route)         |
-| `experimental` | [实验性](./experimental) |
+| Key            | Format                 |
+|----------------|------------------------|
+| `log`          | [日志](./log/)           |
+| `dns`          | [DNS](./dns/)          |
+| `inbounds`     | [入站](./inbound/)       |
+| `outbounds`    | [出站](./outbound/)      |
+| `route`        | [路由](./route/)         |
+| `experimental` | [实验性](./experimental/) |
 
 ### 检查
 
 ```bash
-$ sing-box check
+sing-box check
 ```
 
 ### 格式化
 
 ```bash
-$ sing-box format -w
+sing-box format -w -c config.json -D config_directory
+```
+
+### 合并
+
+```bash
+sing-box merge output.json -c config.json -D config_directory
 ```

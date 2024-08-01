@@ -1,15 +1,15 @@
 package trafficontrol
 
 import (
-	"encoding/json"
 	"net"
 	"net/netip"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
-	"github.com/sagernet/sing-box/experimental/trackerconn"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/atomic"
+	"github.com/sagernet/sing/common/bufio"
+	"github.com/sagernet/sing/common/json"
 	N "github.com/sagernet/sing/common/network"
 
 	"github.com/gofrs/uuid/v5"
@@ -94,7 +94,9 @@ func NewTCPTracker(conn net.Conn, manager *Manager, metadata Metadata, router ad
 	var chain []string
 	var next string
 	if rule == nil {
-		next = router.DefaultOutbound(N.NetworkTCP).Tag()
+		if defaultOutbound, err := router.DefaultOutbound(N.NetworkTCP); err == nil {
+			next = defaultOutbound.Tag()
+		}
 	} else {
 		next = rule.Outbound()
 	}
@@ -115,13 +117,13 @@ func NewTCPTracker(conn net.Conn, manager *Manager, metadata Metadata, router ad
 	download := new(atomic.Int64)
 
 	t := &tcpTracker{
-		ExtendedConn: trackerconn.NewHook(conn, func(n int64) {
+		ExtendedConn: bufio.NewCounterConn(conn, []N.CountFunc{func(n int64) {
 			upload.Add(n)
 			manager.PushUploaded(n)
-		}, func(n int64) {
+		}}, []N.CountFunc{func(n int64) {
 			download.Add(n)
 			manager.PushDownloaded(n)
-		}),
+		}}),
 		manager: manager,
 		trackerInfo: &trackerInfo{
 			UUID:          uuid,
@@ -181,7 +183,9 @@ func NewUDPTracker(conn N.PacketConn, manager *Manager, metadata Metadata, route
 	var chain []string
 	var next string
 	if rule == nil {
-		next = router.DefaultOutbound(N.NetworkUDP).Tag()
+		if defaultOutbound, err := router.DefaultOutbound(N.NetworkUDP); err == nil {
+			next = defaultOutbound.Tag()
+		}
 	} else {
 		next = rule.Outbound()
 	}
@@ -202,13 +206,13 @@ func NewUDPTracker(conn N.PacketConn, manager *Manager, metadata Metadata, route
 	download := new(atomic.Int64)
 
 	ut := &udpTracker{
-		PacketConn: trackerconn.NewHookPacket(conn, func(n int64) {
+		PacketConn: bufio.NewCounterPacketConn(conn, []N.CountFunc{func(n int64) {
 			upload.Add(n)
 			manager.PushUploaded(n)
-		}, func(n int64) {
+		}}, []N.CountFunc{func(n int64) {
 			download.Add(n)
 			manager.PushDownloaded(n)
-		}),
+		}}),
 		manager: manager,
 		trackerInfo: &trackerInfo{
 			UUID:          uuid,

@@ -1,3 +1,7 @@
+!!! quote "sing-box 1.8.0 中的更改"
+
+    :material-alert-decagram: [utls](#utls)  
+
 ### 入站
 
 ```json
@@ -8,9 +12,9 @@
   "min_version": "",
   "max_version": "",
   "cipher_suites": [],
-  "certificate": "",
+  "certificate": [],
   "certificate_path": "",
-  "key": "",
+  "key": [],
   "key_path": "",
   "acme": {
     "domain": [],
@@ -25,7 +29,15 @@
     "external_account": {
       "key_id": "",
       "mac_key": ""
-    }
+    },
+    "dns01_challenge": {}
+  },
+  "ech": {
+    "enabled": false,
+    "pq_signature_schemes_enabled": false,
+    "dynamic_record_sizing_disabled": false,
+    "key": [],
+    "key_path": ""
   },
   "reality": {
     "enabled": false,
@@ -56,13 +68,14 @@
   "min_version": "",
   "max_version": "",
   "cipher_suites": [],
-  "certificate": "",
+  "certificate": [],
   "certificate_path": "",
   "ech": {
     "enabled": false,
     "pq_signature_schemes_enabled": false,
     "dynamic_record_sizing_disabled": false,
-    "config": ""
+    "config": [],
+    "config_path": ""
   },
   "utls": {
     "enabled": false,
@@ -153,16 +166,13 @@ TLS 版本值：
 
 #### cipher_suites
 
-将在 ECDHE 握手中使用的椭圆曲线，按优先顺序排列。
+启用的 TLS 1.0-1.2密码套件的列表。列表的顺序被忽略。请注意，TLS 1.3 的密码套件是不可配置的。
 
-如果为空，将使用默认值。
-
-客户端将使用第一个首选项作为其在 TLS 1.3 中的密钥共享类型。
-这在未来可能会改变。
+如果为空，则使用安全的默认列表。默认密码套件可能会随着时间的推移而改变。
 
 #### certificate
 
-服务器 PEM 证书。
+服务器 PEM 证书行数组。
 
 #### certificate_path
 
@@ -172,7 +182,7 @@ TLS 版本值：
 
 ==仅服务器==
 
-服务器 PEM 私钥。
+服务器 PEM 私钥行数组。
 
 #### key_path
 
@@ -180,26 +190,9 @@ TLS 版本值：
 
 服务器 PEM 私钥路径。
 
-#### ech
-
-==仅客户端==
-
-!!! warning ""
-
-    默认安装不包含 ECH, 参阅 [安装](/zh/#_2)。
-
-ECH (Encrypted Client Hello) 是一个 TLS 扩展，它允许客户端加密其 ClientHello 的第一部分
-信息。
-
-如果您不知道如何填写其他配置，只需设置 `enabled` 即可。
-
 #### utls
 
 ==仅客户端==
-
-!!! warning ""
-
-    默认安装不包含 uTLS, 参阅 [安装](/zh/#_2)。
 
 !!! note ""
 
@@ -209,7 +202,20 @@ uTLS 是 "crypto/tls" 的一个分支，它提供了 ClientHello 指纹识别阻
 
 可用的指纹值：
 
+!!! question "自 sing-box 1.8.0 起"
+
+    :material-plus: chrome_psk  
+    :material-plus: chrome_psk_shuffle  
+    :material-plus: chrome_padding_psk_shuffle  
+    :material-plus: chrome_pq  
+    :material-plus: chrome_pq_psk
+
 * chrome
+* chrome_psk
+* chrome_psk_shuffle
+* chrome_padding_psk_shuffle
+* chrome_pq
+* chrome_pq_psk
 * firefox
 * edge
 * safari
@@ -222,11 +228,55 @@ uTLS 是 "crypto/tls" 的一个分支，它提供了 ClientHello 指纹识别阻
 
 默认使用 chrome 指纹。
 
+## ECH 字段
+
+ECH (Encrypted Client Hello) 是一个 TLS 扩展，它允许客户端加密其 ClientHello 的第一部分
+信息。
+
+ECH 配置和密钥可以通过 `sing-box generate ech-keypair [--pq-signature-schemes-enabled]` 生成。
+
+#### pq_signature_schemes_enabled
+
+启用对后量子对等证书签名方案的支持。
+
+建议匹配 `sing-box generate ech-keypair` 的参数。
+
+#### dynamic_record_sizing_disabled
+
+禁用 TLS 记录的自适应大小调整。
+
+如果为 true，则始终使用最大可能的 TLS 记录大小。
+如果为 false，则可能会调整 TLS 记录的大小以尝试改善延迟。
+
+#### key
+
+==仅服务器==
+
+ECH PEM 密钥行数组
+
+#### key_path
+
+==仅服务器==
+
+ECH PEM 密钥路径
+
+#### config
+
+==仅客户端==
+
+ECH PEM 配置行数组
+
+如果为空，将尝试从 DNS 加载。
+
+#### config_path
+
+==仅客户端==
+
+ECH PEM 配置路径
+
+如果为空，将尝试从 DNS 加载。
+
 ### ACME 字段
-
-!!! warning ""
-
-    默认安装不包含 ACME，参阅 [安装](/zh/#_2)。
 
 #### domain
 
@@ -291,15 +341,13 @@ EAB（外部帐户绑定）包含将 ACME 帐户绑定或映射到其他已知�
 
 MAC 密钥。
 
+#### dns01_challenge
+
+ACME DNS01 验证字段。如果配置，将禁用其他验证方法。
+
+参阅 [DNS01 验证字段](/configuration/shared/dns01_challenge/)。
+
 ### Reality 字段
-
-!!! warning ""
-
-    默认安装不包含 reality 服务器，参阅 [安装](/zh/#_2)。
-
-!!! warning ""
-
-    默认安装不包含被 reality 客户端需要的 uTLS, 参阅 [安装](/zh/#_2)。
 
 #### handshake
 

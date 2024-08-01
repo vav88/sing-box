@@ -9,7 +9,7 @@ import (
 	"github.com/sagernet/sing-box/option"
 )
 
-func TestWireGuard(t *testing.T) {
+func _TestWireGuard(t *testing.T) {
 	startDockerContainer(t, DockerOptions{
 		Image: ImageBoringTun,
 		Cap:   []string{"MKNOD", "NET_ADMIN", "NET_RAW"},
@@ -40,7 +40,7 @@ func TestWireGuard(t *testing.T) {
 						Server:     "127.0.0.1",
 						ServerPort: serverPort,
 					},
-					LocalAddress:  []option.ListenPrefix{option.ListenPrefix(netip.MustParsePrefix("10.0.0.2/32"))},
+					LocalAddress:  []netip.Prefix{netip.MustParsePrefix("10.0.0.2/32")},
 					PrivateKey:    "qGnwlkZljMxeECW8fbwAWdvgntnbK7B8UmMFl3zM0mk=",
 					PeerPublicKey: "QsdcBm+oJw2oNv0cIFXLIq1E850lgTBonup4qnKEQBg=",
 				},

@@ -4,9 +4,10 @@ type ShadowsocksInboundOptions struct {
 	ListenOptions
 	Network      NetworkList              `json:"network,omitempty"`
 	Method       string                   `json:"method"`
-	Password     string                   `json:"password"`
+	Password     string                   `json:"password,omitempty"`
 	Users        []ShadowsocksUser        `json:"users,omitempty"`
 	Destinations []ShadowsocksDestination `json:"destinations,omitempty"`
+	Multiplex    *InboundMultiplexOptions `json:"multiplex,omitempty"`
 }
 
 type ShadowsocksUser struct {
@@ -23,11 +24,11 @@ type ShadowsocksDestination struct {
 type ShadowsocksOutboundOptions struct {
 	DialerOptions
 	ServerOptions
-	Method            string             `json:"method"`
-	Password          string             `json:"password"`
-	Plugin            string             `json:"plugin,omitempty"`
-	PluginOptions     string             `json:"plugin_opts,omitempty"`
-	Network           NetworkList        `json:"network,omitempty"`
-	UDPOverTCPOptions *UDPOverTCPOptions `json:"udp_over_tcp,omitempty"`
-	MultiplexOptions  *MultiplexOptions  `json:"multiplex,omitempty"`
+	Method        string                    `json:"method"`
+	Password      string                    `json:"password"`
+	Plugin        string                    `json:"plugin,omitempty"`
+	PluginOptions string                    `json:"plugin_opts,omitempty"`
+	Network       NetworkList               `json:"network,omitempty"`
+	UDPOverTCP    *UDPOverTCPOptions        `json:"udp_over_tcp,omitempty"`
+	Multiplex     *OutboundMultiplexOptions `json:"multiplex,omitempty"`
 }

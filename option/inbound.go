@@ -1,9 +1,11 @@
 package option
 
 import (
-	"github.com/sagernet/sing-box/common/json"
+	"time"
+
 	C "github.com/sagernet/sing-box/constant"
 	E "github.com/sagernet/sing/common/exceptions"
+	"github.com/sagernet/sing/common/json"
 )
 
 type _Inbound struct {
@@ -23,45 +25,61 @@ type _Inbound struct {
 	HysteriaOptions    HysteriaInboundOptions    `json:"-"`
 	ShadowTLSOptions   ShadowTLSInboundOptions   `json:"-"`
 	VLESSOptions       VLESSInboundOptions       `json:"-"`
+	TUICOptions        TUICInboundOptions        `json:"-"`
+	Hysteria2Options   Hysteria2InboundOptions   `json:"-"`
 }
 
 type Inbound _Inbound
 
-func (h Inbound) MarshalJSON() ([]byte, error) {
-	var v any
+func (h *Inbound) RawOptions() (any, error) {
+	var rawOptionsPtr any
 	switch h.Type {
 	case C.TypeTun:
-		v = h.TunOptions
+		rawOptionsPtr = &h.TunOptions
 	case C.TypeRedirect:
-		v = h.RedirectOptions
+		rawOptionsPtr = &h.RedirectOptions
 	case C.TypeTProxy:
-		v = h.TProxyOptions
+		rawOptionsPtr = &h.TProxyOptions
 	case C.TypeDirect:
-		v = h.DirectOptions
-	case C.TypeSocks:
-		v = h.SocksOptions
+		rawOptionsPtr = &h.DirectOptions
+	case C.TypeSOCKS:
+		rawOptionsPtr = &h.SocksOptions
 	case C.TypeHTTP:
-		v = h.HTTPOptions
+		rawOptionsPtr = &h.HTTPOptions
 	case C.TypeMixed:
-		v = h.MixedOptions
+		rawOptionsPtr = &h.MixedOptions
 	case C.TypeShadowsocks:
-		v = h.ShadowsocksOptions
+		rawOptionsPtr = &h.ShadowsocksOptions
 	case C.TypeVMess:
-		v = h.VMessOptions
+		rawOptionsPtr = &h.VMessOptions
 	case C.TypeTrojan:
-		v = h.TrojanOptions
+		rawOptionsPtr = &h.TrojanOptions
 	case C.TypeNaive:
-		v = h.NaiveOptions
+		rawOptionsPtr = &h.NaiveOptions
 	case C.TypeHysteria:
-		v = h.HysteriaOptions
+		rawOptionsPtr = &h.HysteriaOptions
 	case C.TypeShadowTLS:
-		v = h.ShadowTLSOptions
+		rawOptionsPtr = &h.ShadowTLSOptions
 	case C.TypeVLESS:
-		v = h.VLESSOptions
+		rawOptionsPtr = &h.VLESSOptions
+	case C.TypeTUIC:
+		rawOptionsPtr = &h.TUICOptions
+	case C.TypeHysteria2:
+		rawOptionsPtr = &h.Hysteria2Options
+	case "":
+		return nil, E.New("missing inbound type")
 	default:
 		return nil, E.New("unknown inbound type: ", h.Type)
 	}
-	return MarshallObjects((_Inbound)(h), v)
+	return rawOptionsPtr, nil
+}
+
+func (h Inbound) MarshalJSON() ([]byte, error) {
+	rawOptions, err := h.RawOptions()
+	if err != nil {
+		return nil, err
+	}
+	return MarshallObjects((_Inbound)(h), rawOptions)
 }
 
 func (h *Inbound) UnmarshalJSON(bytes []byte) error {
@@ -69,62 +87,64 @@ func (h *Inbound) UnmarshalJSON(bytes []byte) error {
 	if err != nil {
 		return err
 	}
-	var v any
-	switch h.Type {
-	case C.TypeTun:
-		v = &h.TunOptions
-	case C.TypeRedirect:
-		v = &h.RedirectOptions
-	case C.TypeTProxy:
-		v = &h.TProxyOptions
-	case C.TypeDirect:
-		v = &h.DirectOptions
-	case C.TypeSocks:
-		v = &h.SocksOptions
-	case C.TypeHTTP:
-		v = &h.HTTPOptions
-	case C.TypeMixed:
-		v = &h.MixedOptions
-	case C.TypeShadowsocks:
-		v = &h.ShadowsocksOptions
-	case C.TypeVMess:
-		v = &h.VMessOptions
-	case C.TypeTrojan:
-		v = &h.TrojanOptions
-	case C.TypeNaive:
-		v = &h.NaiveOptions
-	case C.TypeHysteria:
-		v = &h.HysteriaOptions
-	case C.TypeShadowTLS:
-		v = &h.ShadowTLSOptions
-	case C.TypeVLESS:
-		v = &h.VLESSOptions
-	default:
-		return E.New("unknown inbound type: ", h.Type)
-	}
-	err = UnmarshallExcluded(bytes, (*_Inbound)(h), v)
+	rawOptions, err := h.RawOptions()
 	if err != nil {
-		return E.Cause(err, "inbound options")
+		return err
+	}
+	err = UnmarshallExcluded(bytes, (*_Inbound)(h), rawOptions)
+	if err != nil {
+		return err
 	}
 	return nil
 }
 
 type InboundOptions struct {
-	SniffEnabled             bool           `json:"sniff,omitempty"`
-	SniffOverrideDestination bool           `json:"sniff_override_destination,omitempty"`
-	SniffTimeout             Duration       `json:"sniff_timeout,omitempty"`
-	DomainStrategy           DomainStrategy `json:"domain_strategy,omitempty"`
+	SniffEnabled              bool           `json:"sniff,omitempty"`
+	SniffOverrideDestination  bool           `json:"sniff_override_destination,omitempty"`
+	SniffTimeout              Duration       `json:"sniff_timeout,omitempty"`
+	DomainStrategy            DomainStrategy `json:"domain_strategy,omitempty"`
+	UDPDisableDomainUnmapping bool           `json:"udp_disable_domain_unmapping,omitempty"`
 }
 
 type ListenOptions struct {
-	Listen                      *ListenAddress `json:"listen,omitempty"`
-	ListenPort                  uint16         `json:"listen_port,omitempty"`
-	TCPFastOpen                 bool           `json:"tcp_fast_open,omitempty"`
-	UDPFragment                 *bool          `json:"udp_fragment,omitempty"`
-	UDPFragmentDefault          bool           `json:"-"`
-	UDPTimeout                  int64          `json:"udp_timeout,omitempty"`
-	ProxyProtocol               bool           `json:"proxy_protocol,omitempty"`
-	ProxyProtocolAcceptNoHeader bool           `json:"proxy_protocol_accept_no_header,omitempty"`
-	Detour                      string         `json:"detour,omitempty"`
+	Listen                      *ListenAddress   `json:"listen,omitempty"`
+	ListenPort                  uint16           `json:"listen_port,omitempty"`
+	TCPFastOpen                 bool             `json:"tcp_fast_open,omitempty"`
+	TCPMultiPath                bool             `json:"tcp_multi_path,omitempty"`
+	UDPFragment                 *bool            `json:"udp_fragment,omitempty"`
+	UDPFragmentDefault          bool             `json:"-"`
+	UDPTimeout                  UDPTimeoutCompat `json:"udp_timeout,omitempty"`
+	ProxyProtocol               bool             `json:"proxy_protocol,omitempty"`
+	ProxyProtocolAcceptNoHeader bool             `json:"proxy_protocol_accept_no_header,omitempty"`
+	Detour                      string           `json:"detour,omitempty"`
 	InboundOptions
+}
+
+type UDPTimeoutCompat Duration
+
+func (c UDPTimeoutCompat) MarshalJSON() ([]byte, error) {
+	return json.Marshal((time.Duration)(c).String())
+}
+
+func (c *UDPTimeoutCompat) UnmarshalJSON(data []byte) error {
+	var valueNumber int64
+	err := json.Unmarshal(data, &valueNumber)
+	if err == nil {
+		*c = UDPTimeoutCompat(time.Second * time.Duration(valueNumber))
+		return nil
+	}
+	return json.Unmarshal(data, (*Duration)(c))
+}
+
+type ListenOptionsWrapper interface {
+	TakeListenOptions() ListenOptions
+	ReplaceListenOptions(options ListenOptions)
+}
+
+func (o *ListenOptions) TakeListenOptions() ListenOptions {
+	return *o
+}
+
+func (o *ListenOptions) ReplaceListenOptions(options ListenOptions) {
+	*o = options
 }

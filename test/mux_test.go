@@ -4,7 +4,6 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/sagernet/sing-box/common/mux"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-shadowsocks/shadowaead_2022"
@@ -12,24 +11,47 @@ import (
 	"github.com/gofrs/uuid/v5"
 )
 
-var muxProtocols = []mux.Protocol{
-	mux.ProtocolYAMux,
-	mux.ProtocolSMux,
+var muxProtocols = []string{
+	"h2mux",
+	"smux",
+	"yamux",
 }
 
 func TestVMessSMux(t *testing.T) {
-	testVMessMux(t, mux.ProtocolSMux.String())
+	testVMessMux(t, option.OutboundMultiplexOptions{
+		Enabled:  true,
+		Protocol: "smux",
+	})
 }
 
 func TestShadowsocksMux(t *testing.T) {
 	for _, protocol := range muxProtocols {
-		t.Run(protocol.String(), func(t *testing.T) {
-			testShadowsocksMux(t, protocol.String())
+		t.Run(protocol, func(t *testing.T) {
+			testShadowsocksMux(t, option.OutboundMultiplexOptions{
+				Enabled:  true,
+				Protocol: protocol,
+			})
 		})
 	}
 }
 
-func testShadowsocksMux(t *testing.T, protocol string) {
+func TestShadowsockH2Mux(t *testing.T) {
+	testShadowsocksMux(t, option.OutboundMultiplexOptions{
+		Enabled:  true,
+		Protocol: "h2mux",
+		Padding:  true,
+	})
+}
+
+func TestShadowsockSMuxPadding(t *testing.T) {
+	testShadowsocksMux(t, option.OutboundMultiplexOptions{
+		Enabled:  true,
+		Protocol: "smux",
+		Padding:  true,
+	})
+}
+
+func testShadowsocksMux(t *testing.T, options option.OutboundMultiplexOptions) {
 	method := shadowaead_2022.List[0]
 	password := mkBase64(t, 16)
 	startInstance(t, option.Options{
@@ -53,6 +75,9 @@ func testShadowsocksMux(t *testing.T, protocol string) {
 					},
 					Method:   method,
 					Password: password,
+					Multiplex: &option.InboundMultiplexOptions{
+						Enabled: true,
+					},
 				},
 			},
 		},
@@ -68,12 +93,9 @@ func testShadowsocksMux(t *testing.T, protocol string) {
 						Server:     "127.0.0.1",
 						ServerPort: serverPort,
 					},
-					Method:   method,
-					Password: password,
-					MultiplexOptions: &option.MultiplexOptions{
-						Enabled:  true,
-						Protocol: protocol,
-					},
+					Method:    method,
+					Password:  password,
+					Multiplex: &options,
 				},
 			},
 		},
@@ -91,7 +113,7 @@ func testShadowsocksMux(t *testing.T, protocol string) {
 	testSuit(t, clientPort, testPort)
 }
 
-func testVMessMux(t *testing.T, protocol string) {
+func testVMessMux(t *testing.T, options option.OutboundMultiplexOptions) {
 	user, _ := uuid.NewV4()
 	startInstance(t, option.Options{
 		Inbounds: []option.Inbound{
@@ -117,6 +139,9 @@ func testVMessMux(t *testing.T, protocol string) {
 							UUID: user.String(),
 						},
 					},
+					Multiplex: &option.InboundMultiplexOptions{
+						Enabled: true,
+					},
 				},
 			},
 		},
@@ -132,12 +157,9 @@ func testVMessMux(t *testing.T, protocol string) {
 						Server:     "127.0.0.1",
 						ServerPort: serverPort,
 					},
-					Security: "auto",
-					UUID:     user.String(),
-					Multiplex: &option.MultiplexOptions{
-						Enabled:  true,
-						Protocol: protocol,
-					},
+					Security:  "auto",
+					UUID:      user.String(),
+					Multiplex: &options,
 				},
 			},
 		},

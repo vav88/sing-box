@@ -10,12 +10,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sagernet/sing-box/common/baderror"
 	"github.com/sagernet/sing/common"
+	"github.com/sagernet/sing/common/baderror"
 	"github.com/sagernet/sing/common/buf"
 	"github.com/sagernet/sing/common/bufio"
 	E "github.com/sagernet/sing/common/exceptions"
 	F "github.com/sagernet/sing/common/format"
+	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 )
 
@@ -174,11 +175,11 @@ func (c *HTTP2Conn) Close() error {
 }
 
 func (c *HTTP2Conn) LocalAddr() net.Addr {
-	return nil
+	return M.Socksaddr{}
 }
 
 func (c *HTTP2Conn) RemoteAddr() net.Addr {
-	return nil
+	return M.Socksaddr{}
 }
 
 func (c *HTTP2Conn) SetDeadline(t time.Time) error {
@@ -199,13 +200,13 @@ func (c *HTTP2Conn) NeedAdditionalReadDeadline() bool {
 
 type ServerHTTPConn struct {
 	HTTP2Conn
-	flusher http.Flusher
+	Flusher http.Flusher
 }
 
 func (c *ServerHTTPConn) Write(b []byte) (n int, err error) {
 	n, err = c.writer.Write(b)
 	if err == nil {
-		c.flusher.Flush()
+		c.Flusher.Flush()
 	}
 	return
 }
@@ -244,6 +245,11 @@ func (w *HTTP2ConnWrapper) CloseWrapper() {
 	w.access.Lock()
 	defer w.access.Unlock()
 	w.closed = true
+}
+
+func (w *HTTP2ConnWrapper) Close() error {
+	w.CloseWrapper()
+	return w.ExtendedConn.Close()
 }
 
 func (w *HTTP2ConnWrapper) Upstream() any {

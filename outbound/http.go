@@ -24,24 +24,31 @@ type HTTP struct {
 	client *sHTTP.Client
 }
 
-func NewHTTP(router adapter.Router, logger log.ContextLogger, tag string, options option.HTTPOutboundOptions) (*HTTP, error) {
-	detour, err := tls.NewDialerFromOptions(router, dialer.New(router, options.DialerOptions), options.Server, common.PtrValueOrDefault(options.TLS))
+func NewHTTP(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.HTTPOutboundOptions) (*HTTP, error) {
+	outboundDialer, err := dialer.New(router, options.DialerOptions)
+	if err != nil {
+		return nil, err
+	}
+	detour, err := tls.NewDialerFromOptions(ctx, router, outboundDialer, options.Server, common.PtrValueOrDefault(options.TLS))
 	if err != nil {
 		return nil, err
 	}
 	return &HTTP{
 		myOutboundAdapter{
-			protocol: C.TypeHTTP,
-			network:  []string{N.NetworkTCP},
-			router:   router,
-			logger:   logger,
-			tag:      tag,
+			protocol:     C.TypeHTTP,
+			network:      []string{N.NetworkTCP},
+			router:       router,
+			logger:       logger,
+			tag:          tag,
+			dependencies: withDialerDependency(options.DialerOptions),
 		},
 		sHTTP.NewClient(sHTTP.Options{
 			Dialer:   detour,
 			Server:   options.ServerOptions.Build(),
 			Username: options.Username,
 			Password: options.Password,
+			Path:     options.Path,
+			Headers:  options.Headers.Build(),
 		}),
 	}, nil
 }

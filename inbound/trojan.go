@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/mux"
 	"github.com/sagernet/sing-box/common/tls"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
@@ -49,7 +50,7 @@ func NewTrojan(ctx context.Context, router adapter.Router, logger log.ContextLog
 		users: options.Users,
 	}
 	if options.TLS != nil {
-		tlsConfig, err := tls.NewServer(ctx, router, logger, common.PtrValueOrDefault(options.TLS))
+		tlsConfig, err := tls.NewServer(ctx, logger, common.PtrValueOrDefault(options.TLS))
 		if err != nil {
 			return nil, err
 		}
@@ -93,6 +94,10 @@ func NewTrojan(ctx context.Context, router adapter.Router, logger log.ContextLog
 		if err != nil {
 			return nil, E.Cause(err, "create server transport: ", options.Transport.Type)
 		}
+	}
+	inbound.router, err = mux.NewRouterWithOptions(inbound.router, logger, common.PtrValueOrDefault(options.Multiplex))
+	if err != nil {
+		return nil, err
 	}
 	inbound.service = service
 	inbound.connHandler = inbound
@@ -223,13 +228,6 @@ type trojanTransportHandler Trojan
 
 func (t *trojanTransportHandler) NewConnection(ctx context.Context, conn net.Conn, metadata M.Metadata) error {
 	return (*Trojan)(t).newTransportConnection(ctx, conn, adapter.InboundContext{
-		Source:      metadata.Source,
-		Destination: metadata.Destination,
-	})
-}
-
-func (t *trojanTransportHandler) FallbackConnection(ctx context.Context, conn net.Conn, metadata M.Metadata) error {
-	return (*Trojan)(t).fallbackConnection(ctx, conn, adapter.InboundContext{
 		Source:      metadata.Source,
 		Destination: metadata.Destination,
 	})

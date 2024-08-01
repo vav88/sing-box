@@ -8,21 +8,22 @@ import (
 	"net/netip"
 	"os"
 
+	"github.com/sagernet/gvisor/pkg/buffer"
+	"github.com/sagernet/gvisor/pkg/tcpip"
+	"github.com/sagernet/gvisor/pkg/tcpip/adapters/gonet"
+	"github.com/sagernet/gvisor/pkg/tcpip/header"
+	"github.com/sagernet/gvisor/pkg/tcpip/network/ipv4"
+	"github.com/sagernet/gvisor/pkg/tcpip/network/ipv6"
+	"github.com/sagernet/gvisor/pkg/tcpip/stack"
+	"github.com/sagernet/gvisor/pkg/tcpip/transport/icmp"
+	"github.com/sagernet/gvisor/pkg/tcpip/transport/tcp"
+	"github.com/sagernet/gvisor/pkg/tcpip/transport/udp"
+	"github.com/sagernet/sing-tun"
+	"github.com/sagernet/sing/common/buf"
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
-	"github.com/sagernet/wireguard-go/tun"
-
-	"gvisor.dev/gvisor/pkg/bufferv2"
-	"gvisor.dev/gvisor/pkg/tcpip"
-	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
-	"gvisor.dev/gvisor/pkg/tcpip/header"
-	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
-	"gvisor.dev/gvisor/pkg/tcpip/network/ipv6"
-	"gvisor.dev/gvisor/pkg/tcpip/stack"
-	"gvisor.dev/gvisor/pkg/tcpip/transport/icmp"
-	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
-	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
+	wgTun "github.com/sagernet/wireguard-go/tun"
 )
 
 var _ Device = (*StackDevice)(nil)
@@ -30,14 +31,15 @@ var _ Device = (*StackDevice)(nil)
 const defaultNIC tcpip.NICID = 1
 
 type StackDevice struct {
-	stack      *stack.Stack
-	mtu        uint32
-	events     chan tun.Event
-	outbound   chan *stack.PacketBuffer
-	done       chan struct{}
-	dispatcher stack.NetworkDispatcher
-	addr4      tcpip.Address
-	addr6      tcpip.Address
+	stack          *stack.Stack
+	mtu            uint32
+	events         chan wgTun.Event
+	outbound       chan *stack.PacketBuffer
+	packetOutbound chan *buf.Buffer
+	done           chan struct{}
+	dispatcher     stack.NetworkDispatcher
+	addr4          tcpip.Address
+	addr6          tcpip.Address
 }
 
 func NewStackDevice(localAddresses []netip.Prefix, mtu uint32) (*StackDevice, error) {
@@ -47,18 +49,19 @@ func NewStackDevice(localAddresses []netip.Prefix, mtu uint32) (*StackDevice, er
 		HandleLocal:        true,
 	})
 	tunDevice := &StackDevice{
-		stack:    ipStack,
-		mtu:      mtu,
-		events:   make(chan tun.Event, 1),
-		outbound: make(chan *stack.PacketBuffer, 256),
-		done:     make(chan struct{}),
+		stack:          ipStack,
+		mtu:            mtu,
+		events:         make(chan wgTun.Event, 1),
+		outbound:       make(chan *stack.PacketBuffer, 256),
+		packetOutbound: make(chan *buf.Buffer, 256),
+		done:           make(chan struct{}),
 	}
 	err := ipStack.CreateNIC(defaultNIC, (*wireEndpoint)(tunDevice))
 	if err != nil {
 		return nil, E.New(err.String())
 	}
 	for _, prefix := range localAddresses {
-		addr := tcpip.Address(prefix.Addr().AsSlice())
+		addr := tun.AddressFromAddr(prefix.Addr())
 		protoAddr := tcpip.ProtocolAddress{
 			AddressWithPrefix: tcpip.AddressWithPrefix{
 				Address:   addr,
@@ -94,7 +97,7 @@ func (w *StackDevice) DialContext(ctx context.Context, network string, destinati
 	addr := tcpip.FullAddress{
 		NIC:  defaultNIC,
 		Port: destination.Port,
-		Addr: tcpip.Address(destination.Addr.AsSlice()),
+		Addr: tun.AddressFromAddr(destination.Addr),
 	}
 	bind := tcpip.FullAddress{
 		NIC: defaultNIC,
@@ -109,7 +112,7 @@ func (w *StackDevice) DialContext(ctx context.Context, network string, destinati
 	}
 	switch N.NetworkName(network) {
 	case N.NetworkTCP:
-		tcpConn, err := gonet.DialTCPWithBind(ctx, w.stack, bind, addr, networkProtocol)
+		tcpConn, err := DialTCPWithBind(ctx, w.stack, bind, addr, networkProtocol)
 		if err != nil {
 			return nil, err
 		}
@@ -130,7 +133,7 @@ func (w *StackDevice) ListenPacket(ctx context.Context, destination M.Socksaddr)
 		NIC: defaultNIC,
 	}
 	var networkProtocol tcpip.NetworkProtocolNumber
-	if destination.IsIPv4() || w.addr6 == "" {
+	if destination.IsIPv4() {
 		networkProtocol = header.IPv4ProtocolNumber
 		bind.Addr = w.addr4
 	} else {
@@ -144,8 +147,16 @@ func (w *StackDevice) ListenPacket(ctx context.Context, destination M.Socksaddr)
 	return udpConn, nil
 }
 
+func (w *StackDevice) Inet4Address() netip.Addr {
+	return tun.AddrFromAddress(w.addr4)
+}
+
+func (w *StackDevice) Inet6Address() netip.Addr {
+	return tun.AddrFromAddress(w.addr6)
+}
+
 func (w *StackDevice) Start() error {
-	w.events <- tun.EventUp
+	w.events <- wgTun.EventUp
 	return nil
 }
 
@@ -153,41 +164,52 @@ func (w *StackDevice) File() *os.File {
 	return nil
 }
 
-func (w *StackDevice) Read(p []byte, offset int) (n int, err error) {
+func (w *StackDevice) Read(bufs [][]byte, sizes []int, offset int) (count int, err error) {
 	select {
 	case packetBuffer, ok := <-w.outbound:
 		if !ok {
 			return 0, os.ErrClosed
 		}
 		defer packetBuffer.DecRef()
+		p := bufs[0]
 		p = p[offset:]
+		n := 0
 		for _, slice := range packetBuffer.AsSlices() {
 			n += copy(p[n:], slice)
 		}
+		sizes[0] = n
+		count = 1
+		return
+	case packet := <-w.packetOutbound:
+		defer packet.Release()
+		sizes[0] = copy(bufs[0][offset:], packet.Bytes())
+		count = 1
 		return
 	case <-w.done:
 		return 0, os.ErrClosed
 	}
 }
 
-func (w *StackDevice) Write(p []byte, offset int) (n int, err error) {
-	p = p[offset:]
-	if len(p) == 0 {
-		return
+func (w *StackDevice) Write(bufs [][]byte, offset int) (count int, err error) {
+	for _, b := range bufs {
+		b = b[offset:]
+		if len(b) == 0 {
+			continue
+		}
+		var networkProtocol tcpip.NetworkProtocolNumber
+		switch header.IPVersion(b) {
+		case header.IPv4Version:
+			networkProtocol = header.IPv4ProtocolNumber
+		case header.IPv6Version:
+			networkProtocol = header.IPv6ProtocolNumber
+		}
+		packetBuffer := stack.NewPacketBuffer(stack.PacketBufferOptions{
+			Payload: buffer.MakeWithData(b),
+		})
+		w.dispatcher.DeliverNetworkPacket(networkProtocol, packetBuffer)
+		packetBuffer.DecRef()
+		count++
 	}
-	var networkProtocol tcpip.NetworkProtocolNumber
-	switch header.IPVersion(p) {
-	case header.IPv4Version:
-		networkProtocol = header.IPv4ProtocolNumber
-	case header.IPv6Version:
-		networkProtocol = header.IPv6ProtocolNumber
-	}
-	packetBuffer := stack.NewPacketBuffer(stack.PacketBufferOptions{
-		Payload: bufferv2.MakeWithData(p),
-	})
-	defer packetBuffer.DecRef()
-	w.dispatcher.DeliverNetworkPacket(networkProtocol, packetBuffer)
-	n = len(p)
 	return
 }
 
@@ -203,7 +225,7 @@ func (w *StackDevice) Name() (string, error) {
 	return "sing-box", nil
 }
 
-func (w *StackDevice) Events() chan tun.Event {
+func (w *StackDevice) Events() <-chan wgTun.Event {
 	return w.events
 }
 
@@ -220,6 +242,10 @@ func (w *StackDevice) Close() error {
 	w.stack.Wait()
 	close(w.done)
 	return nil
+}
+
+func (w *StackDevice) BatchSize() int {
+	return 1
 }
 
 var _ stack.LinkEndpoint = (*wireEndpoint)(nil)
@@ -239,7 +265,7 @@ func (ep *wireEndpoint) LinkAddress() tcpip.LinkAddress {
 }
 
 func (ep *wireEndpoint) Capabilities() stack.LinkEndpointCapabilities {
-	return stack.CapabilityNone
+	return stack.CapabilityRXChecksumOffload
 }
 
 func (ep *wireEndpoint) Attach(dispatcher stack.NetworkDispatcher) {
@@ -258,6 +284,10 @@ func (ep *wireEndpoint) ARPHardwareType() header.ARPHardwareType {
 }
 
 func (ep *wireEndpoint) AddHeader(buffer *stack.PacketBuffer) {
+}
+
+func (ep *wireEndpoint) ParseHeader(ptr *stack.PacketBuffer) bool {
+	return true
 }
 
 func (ep *wireEndpoint) WritePackets(list stack.PacketBufferList) (int, tcpip.Error) {

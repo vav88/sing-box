@@ -1,4 +1,18 @@
-!!! error ""
+---
+icon: material/new-box
+---
+
+!!! quote "sing-box 1.9.0 中的更改"
+
+    :material-plus: [platform.http_proxy.bypass_domain](#platformhttp_proxybypass_domain)  
+    :material-plus: [platform.http_proxy.match_domain](#platformhttp_proxymatch_domain)  
+
+!!! quote "sing-box 1.8.0 中的更改"
+
+    :material-plus: [gso](#gso)  
+    :material-alert-decagram: [stack](#stack)
+
+!!! quote ""
 
     仅支持 Linux、Windows 和 macOS。
 
@@ -12,6 +26,7 @@
   "inet4_address": "172.19.0.1/30",
   "inet6_address": "fdfe:dcba:9876::1/126",
   "mtu": 9000,
+  "gso": false,
   "auto_route": true,
   "strict_route": true,
   "inet4_route_address": [
@@ -22,8 +37,21 @@
     "::/1",
     "8000::/1"
   ],
+  "inet4_route_exclude_address": [
+    "192.168.0.0/16"
+  ],
+  "inet6_route_exclude_address": [
+    "fc00::/7"
+  ],
   "endpoint_independent_nat": false,
+  "udp_timeout": "5m",
   "stack": "system",
+  "include_interface": [
+    "lan0"
+  ],
+  "exclude_interface": [
+    "lan1"
+  ],
   "include_uid": [
     0
   ],
@@ -50,7 +78,9 @@
     "http_proxy": {
       "enabled": false,
       "server": "127.0.0.1",
-      "server_port": 8080
+      "server_port": 8080,
+      "bypass_domain": [],
+      "match_domain": []
     }
   },
   
@@ -86,11 +116,21 @@ tun 接口的 IPv6 前缀。
 
 最大传输单元。
 
+#### gso
+
+!!! question "自 sing-box 1.8.0 起"
+
+!!! quote ""
+
+    仅支持 Linux。
+
+启用通用分段卸载。
+
 #### auto_route
 
 设置到 Tun 的默认路由。
 
-!!! error ""
+!!! quote ""
 
     为避免流量环回，请设置 `route.auto_detect_interface` 或 `route.default_interface` 或 `outbound.bind_interface`。
 
@@ -107,7 +147,7 @@ tun 接口的 IPv6 前缀。
 * 让不支持的网络无法到达
 * 将所有连接路由到 tun
 
-它可以防止地址泄漏，并使 DNS 劫持在 Android 上工作，但你的设备将无法其他设备被访问。
+它可以防止地址泄漏，并使 DNS 劫持在 Android 上工作。
 
 *在 Windows 中*:
 
@@ -125,6 +165,14 @@ tun 接口的 IPv6 前缀。
 
 启用 `auto_route` 时使用自定义路由而不是默认路由。
 
+#### inet4_route_exclude_address
+
+启用 `auto_route` 时排除自定义路由。
+
+#### inet6_route_exclude_address
+
+启用 `auto_route` 时排除自定义路由。
+
 #### endpoint_independent_nat
 
 启用独立于端点的 NAT。
@@ -137,21 +185,39 @@ UDP NAT 过期时间，以秒为单位，默认为 300（5 分钟）。
 
 #### stack
 
+!!! quote "sing-box 1.8.0 中的更改"
+
+    :material-delete-alert: 旧的 LWIP 栈已被弃用并移除。
+
 TCP/IP 栈。
 
-| 栈           | 描述                                                                       | 状态    |
-|-------------|--------------------------------------------------------------------------|-------|
-| system （默认） | 有时性能更好                                                                   | 推荐    |
-| gVisor      | 兼容性较好，基于 [google/gvisor](https://github.com/google/gvisor)               | 推荐    |
-| LWIP        | 基于 [eycorsican/go-tun2socks](https://github.com/eycorsican/go-tun2socks) | 上游已存档 |
+| 栈      | 描述                                                               |
+|--------|------------------------------------------------------------------|
+| system | 基于系统网络栈执行 L3 到 L4 转换                                             |
+| gVisor | 基于 [gVisor](https://github.com/google/gvisor) 虚拟网络栈执行 L3 到 L4 转换 |
+| mixed  | 混合 `system` TCP 栈与 `gvisor` UDP 栈                                |
 
-!!! warning ""
+默认使用 `mixed` 栈如果 gVisor 构建标记已启用，否则默认使用 `system` 栈。
 
-    默认安装不包含 gVisor 和 LWIP 栈，请参阅 [安装](/zh/#_2)。
+#### include_interface
+
+!!! quote ""
+
+    接口规则仅在 Linux 下被支持，并且需要 `auto_route`。
+
+限制被路由的接口。默认不限制。
+
+与 `exclude_interface` 冲突。
+
+#### exclude_interface
+
+排除路由的接口。
+
+与 `include_interface` 冲突。
 
 #### include_uid
 
-!!! error ""
+!!! quote ""
 
     UID 规则仅在 Linux 下被支持，并且需要 `auto_route`。
 
@@ -171,15 +237,15 @@ TCP/IP 栈。
 
 #### include_android_user
 
-!!! error ""
+!!! quote ""
 
     Android 用户和应用规则仅在 Android 下被支持，并且需要 `auto_route`。
 
 限制被路由的 Android 用户。
 
 | 常用用户 | ID |
-|--|-----|
-| 您 | 0 |
+|------|----|
+| 您    | 0  |
 | 工作资料 | 10 |
 
 #### include_package
@@ -197,6 +263,38 @@ TCP/IP 栈。
 #### platform.http_proxy
 
 系统 HTTP 代理设置。
+
+##### platform.http_proxy.enabled
+
+启用系统 HTTP 代理。
+
+##### platform.http_proxy.server
+
+==必填==
+
+系统 HTTP 代理服务器地址。
+
+##### platform.http_proxy.server_port
+
+==必填==
+
+系统 HTTP 代理服务器端口。
+
+##### platform.http_proxy.bypass_domain
+
+!!! note ""
+
+  在 Apple 平台，`bypass_domain` 项匹配主机名 **后缀**.
+
+绕过代理的主机名列表。
+
+##### platform.http_proxy.match_domain
+
+!!! quote ""
+
+    仅在 Apple 平台图形客户端中支持。
+
+代理的主机名列表。
 
 ### 监听字段
 

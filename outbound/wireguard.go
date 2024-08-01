@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
+	"net/netip"
 	"strings"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -16,12 +17,16 @@ import (
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/transport/wireguard"
+	"github.com/sagernet/sing-dns"
 	"github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common"
-	"github.com/sagernet/sing/common/debug"
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
+	"github.com/sagernet/sing/common/x/list"
+	"github.com/sagernet/sing/service"
+	"github.com/sagernet/sing/service/pause"
+	"github.com/sagernet/wireguard-go/conn"
 	"github.com/sagernet/wireguard-go/device"
 )
 
@@ -32,35 +37,55 @@ var (
 
 type WireGuard struct {
 	myOutboundAdapter
-	bind      *wireguard.ClientBind
-	device    *device.Device
-	tunDevice wireguard.Device
+	ctx           context.Context
+	workers       int
+	peers         []wireguard.PeerConfig
+	useStdNetBind bool
+	listener      N.Dialer
+	ipcConf       string
+
+	pauseManager  pause.Manager
+	pauseCallback *list.Element[pause.Callback]
+	bind          conn.Bind
+	device        *device.Device
+	tunDevice     wireguard.Device
 }
 
 func NewWireGuard(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.WireGuardOutboundOptions) (*WireGuard, error) {
 	outbound := &WireGuard{
 		myOutboundAdapter: myOutboundAdapter{
-			protocol: C.TypeWireGuard,
-			network:  options.Network.Build(),
-			router:   router,
-			logger:   logger,
-			tag:      tag,
+			protocol:     C.TypeWireGuard,
+			network:      options.Network.Build(),
+			router:       router,
+			logger:       logger,
+			tag:          tag,
+			dependencies: withDialerDependency(options.DialerOptions),
 		},
+		ctx:          ctx,
+		workers:      options.Workers,
+		pauseManager: service.FromContext[pause.Manager](ctx),
 	}
-	var reserved [3]uint8
-	if len(options.Reserved) > 0 {
-		if len(options.Reserved) != 3 {
-			return nil, E.New("invalid reserved value, required 3 bytes, got ", len(options.Reserved))
-		}
-		copy(reserved[:], options.Reserved)
+	peers, err := wireguard.ParsePeers(options)
+	if err != nil {
+		return nil, err
 	}
-	peerAddr := options.ServerOptions.Build()
-	outbound.bind = wireguard.NewClientBind(ctx, dialer.New(router, options.DialerOptions), peerAddr, reserved)
-	localPrefixes := common.Map(options.LocalAddress, option.ListenPrefix.Build)
-	if len(localPrefixes) == 0 {
+	outbound.peers = peers
+	if len(options.LocalAddress) == 0 {
 		return nil, E.New("missing local address")
 	}
-	var privateKey, peerPublicKey, preSharedKey string
+	if options.GSO {
+		if options.GSO && options.Detour != "" {
+			return nil, E.New("gso is conflict with detour")
+		}
+		options.IsWireGuardListener = true
+		outbound.useStdNetBind = true
+	}
+	listener, err := dialer.New(router, options.DialerOptions)
+	if err != nil {
+		return nil, err
+	}
+	outbound.listener = listener
+	var privateKey string
 	{
 		bytes, err := base64.StdEncoding.DecodeString(options.PrivateKey)
 		if err != nil {
@@ -68,77 +93,109 @@ func NewWireGuard(ctx context.Context, router adapter.Router, logger log.Context
 		}
 		privateKey = hex.EncodeToString(bytes)
 	}
-	{
-		bytes, err := base64.StdEncoding.DecodeString(options.PeerPublicKey)
-		if err != nil {
-			return nil, E.Cause(err, "decode peer public key")
-		}
-		peerPublicKey = hex.EncodeToString(bytes)
-	}
-	if options.PreSharedKey != "" {
-		bytes, err := base64.StdEncoding.DecodeString(options.PreSharedKey)
-		if err != nil {
-			return nil, E.Cause(err, "decode pre shared key")
-		}
-		preSharedKey = hex.EncodeToString(bytes)
-	}
-	ipcConf := "private_key=" + privateKey
-	ipcConf += "\npublic_key=" + peerPublicKey
-	ipcConf += "\nendpoint=" + peerAddr.String()
-	if preSharedKey != "" {
-		ipcConf += "\npreshared_key=" + preSharedKey
-	}
-	var has4, has6 bool
-	for _, address := range localPrefixes {
-		if address.Addr().Is4() {
-			has4 = true
-		} else {
-			has6 = true
-		}
-	}
-	if has4 {
-		ipcConf += "\nallowed_ip=0.0.0.0/0"
-	}
-	if has6 {
-		ipcConf += "\nallowed_ip=::/0"
-	}
+	outbound.ipcConf = "private_key=" + privateKey
 	mtu := options.MTU
 	if mtu == 0 {
 		mtu = 1408
 	}
 	var wireTunDevice wireguard.Device
-	var err error
 	if !options.SystemInterface && tun.WithGVisor {
-		wireTunDevice, err = wireguard.NewStackDevice(localPrefixes, mtu)
+		wireTunDevice, err = wireguard.NewStackDevice(options.LocalAddress, mtu)
 	} else {
-		wireTunDevice, err = wireguard.NewSystemDevice(router, options.InterfaceName, localPrefixes, mtu)
+		wireTunDevice, err = wireguard.NewSystemDevice(router, options.InterfaceName, options.LocalAddress, mtu, options.GSO)
 	}
 	if err != nil {
 		return nil, E.Cause(err, "create WireGuard device")
 	}
-	wgDevice := device.NewDevice(wireTunDevice, outbound.bind, &device.Logger{
-		Verbosef: func(format string, args ...interface{}) {
-			logger.Debug(fmt.Sprintf(strings.ToLower(format), args...))
-		},
-		Errorf: func(format string, args ...interface{}) {
-			logger.Error(fmt.Sprintf(strings.ToLower(format), args...))
-		},
-	}, options.Workers)
-	if debug.Enabled {
-		logger.Trace("created wireguard ipc conf: \n", ipcConf)
-	}
-	err = wgDevice.IpcSet(ipcConf)
-	if err != nil {
-		return nil, E.Cause(err, "setup wireguard")
-	}
-	outbound.device = wgDevice
 	outbound.tunDevice = wireTunDevice
 	return outbound, nil
 }
 
-func (w *WireGuard) InterfaceUpdated() error {
-	w.bind.Reset()
+func (w *WireGuard) Start() error {
+	if common.Any(w.peers, func(peer wireguard.PeerConfig) bool {
+		return !peer.Endpoint.IsValid()
+	}) {
+		// wait for all outbounds to be started and continue in PortStart
+		return nil
+	}
+	return w.start()
+}
+
+func (w *WireGuard) PostStart() error {
+	if common.All(w.peers, func(peer wireguard.PeerConfig) bool {
+		return peer.Endpoint.IsValid()
+	}) {
+		return nil
+	}
+	return w.start()
+}
+
+func (w *WireGuard) start() error {
+	err := wireguard.ResolvePeers(w.ctx, w.router, w.peers)
+	if err != nil {
+		return err
+	}
+	var bind conn.Bind
+	if w.useStdNetBind {
+		bind = conn.NewStdNetBind(w.listener.(dialer.WireGuardListener))
+	} else {
+		var (
+			isConnect   bool
+			connectAddr netip.AddrPort
+			reserved    [3]uint8
+		)
+		peerLen := len(w.peers)
+		if peerLen == 1 {
+			isConnect = true
+			connectAddr = w.peers[0].Endpoint
+			reserved = w.peers[0].Reserved
+		}
+		bind = wireguard.NewClientBind(w.ctx, w, w.listener, isConnect, connectAddr, reserved)
+	}
+	wgDevice := device.NewDevice(w.tunDevice, bind, &device.Logger{
+		Verbosef: func(format string, args ...interface{}) {
+			w.logger.Debug(fmt.Sprintf(strings.ToLower(format), args...))
+		},
+		Errorf: func(format string, args ...interface{}) {
+			w.logger.Error(fmt.Sprintf(strings.ToLower(format), args...))
+		},
+	}, w.workers)
+	ipcConf := w.ipcConf
+	for _, peer := range w.peers {
+		ipcConf += peer.GenerateIpcLines()
+	}
+	err = wgDevice.IpcSet(ipcConf)
+	if err != nil {
+		return E.Cause(err, "setup wireguard: \n", ipcConf)
+	}
+	w.device = wgDevice
+	w.pauseCallback = w.pauseManager.RegisterCallback(w.onPauseUpdated)
+	return w.tunDevice.Start()
+}
+
+func (w *WireGuard) Close() error {
+	if w.device != nil {
+		w.device.Close()
+	}
+	if w.pauseCallback != nil {
+		w.pauseManager.UnregisterCallback(w.pauseCallback)
+	}
+	w.tunDevice.Close()
 	return nil
+}
+
+func (w *WireGuard) InterfaceUpdated() {
+	w.device.BindUpdate()
+	return
+}
+
+func (w *WireGuard) onPauseUpdated(event int) {
+	switch event {
+	case pause.EventDevicePaused:
+		w.device.Down()
+	case pause.EventDeviceWake:
+		w.device.Up()
+	}
 }
 
 func (w *WireGuard) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
@@ -149,36 +206,35 @@ func (w *WireGuard) DialContext(ctx context.Context, network string, destination
 		w.logger.InfoContext(ctx, "outbound packet connection to ", destination)
 	}
 	if destination.IsFqdn() {
-		addrs, err := w.router.LookupDefault(ctx, destination.Fqdn)
+		destinationAddresses, err := w.router.LookupDefault(ctx, destination.Fqdn)
 		if err != nil {
 			return nil, err
 		}
-		return N.DialSerial(ctx, w.tunDevice, network, destination, addrs)
+		return N.DialSerial(ctx, w.tunDevice, network, destination, destinationAddresses)
 	}
 	return w.tunDevice.DialContext(ctx, network, destination)
 }
 
 func (w *WireGuard) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
 	w.logger.InfoContext(ctx, "outbound packet connection to ", destination)
+	if destination.IsFqdn() {
+		destinationAddresses, err := w.router.LookupDefault(ctx, destination.Fqdn)
+		if err != nil {
+			return nil, err
+		}
+		packetConn, _, err := N.ListenSerial(ctx, w.tunDevice, destination, destinationAddresses)
+		if err != nil {
+			return nil, err
+		}
+		return packetConn, err
+	}
 	return w.tunDevice.ListenPacket(ctx, destination)
 }
 
 func (w *WireGuard) NewConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext) error {
-	return NewConnection(ctx, w, conn, metadata)
+	return NewDirectConnection(ctx, w.router, w, conn, metadata, dns.DomainStrategyAsIS)
 }
 
 func (w *WireGuard) NewPacketConnection(ctx context.Context, conn N.PacketConn, metadata adapter.InboundContext) error {
-	return NewPacketConnection(ctx, w, conn, metadata)
-}
-
-func (w *WireGuard) Start() error {
-	return w.tunDevice.Start()
-}
-
-func (w *WireGuard) Close() error {
-	if w.device != nil {
-		w.device.Close()
-	}
-	w.tunDevice.Close()
-	return nil
+	return NewDirectPacketConnection(ctx, w.router, w, conn, metadata, dns.DomainStrategyAsIS)
 }

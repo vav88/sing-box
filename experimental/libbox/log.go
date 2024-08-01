@@ -4,6 +4,7 @@ package libbox
 
 import (
 	"os"
+	"runtime"
 
 	"golang.org/x/sys/unix"
 )
@@ -17,6 +18,14 @@ func RedirectStderr(path string) error {
 	outputFile, err := os.Create(path)
 	if err != nil {
 		return err
+	}
+	if runtime.GOOS != "android" {
+		err = outputFile.Chown(sUserID, sGroupID)
+		if err != nil {
+			outputFile.Close()
+			os.Remove(outputFile.Name())
+			return err
+		}
 	}
 	err = unix.Dup2(int(outputFile.Fd()), int(os.Stderr.Fd()))
 	if err != nil {

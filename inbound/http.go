@@ -8,6 +8,7 @@ import (
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/tls"
+	"github.com/sagernet/sing-box/common/uot"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
@@ -25,7 +26,7 @@ var (
 
 type HTTP struct {
 	myInboundAdapter
-	authenticator auth.Authenticator
+	authenticator *auth.Authenticator
 	tlsConfig     tls.ServerConfig
 }
 
@@ -35,7 +36,7 @@ func NewHTTP(ctx context.Context, router adapter.Router, logger log.ContextLogge
 			protocol:       C.TypeHTTP,
 			network:        []string{N.NetworkTCP},
 			ctx:            ctx,
-			router:         router,
+			router:         uot.NewRouter(router, logger),
 			logger:         logger,
 			tag:            tag,
 			listenOptions:  options.ListenOptions,
@@ -44,7 +45,7 @@ func NewHTTP(ctx context.Context, router adapter.Router, logger log.ContextLogge
 		authenticator: auth.NewAuthenticator(options.Users),
 	}
 	if options.TLS != nil {
-		tlsConfig, err := tls.NewServer(ctx, router, logger, common.PtrValueOrDefault(options.TLS))
+		tlsConfig, err := tls.NewServer(ctx, logger, common.PtrValueOrDefault(options.TLS))
 		if err != nil {
 			return nil, err
 		}

@@ -89,13 +89,13 @@ Shadowsocks SIP003 插件参数。
 
 UDP over TCP 配置。
 
-参阅 [UDP Over TCP](/zh/configuration/shared/udp-over-tcp)。
+参阅 [UDP Over TCP](/zh/configuration/shared/udp-over-tcp/)。
 
 与 `multiplex` 冲突。
 
 #### multiplex
 
-多路复用配置, 参阅 [多路复用](/zh/configuration/shared/multiplex)。
+参阅 [多路复用](/zh/configuration/shared/multiplex#outbound)。
 
 ### 拨号字段
 

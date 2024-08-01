@@ -12,7 +12,6 @@ import (
 	"github.com/sagernet/sing-box/common/tls"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
-	"github.com/sagernet/sing-box/transport/v2rayhttp"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
 	"github.com/sagernet/sing/common/bufio"
@@ -21,7 +20,7 @@ import (
 	N "github.com/sagernet/sing/common/network"
 	aTLS "github.com/sagernet/sing/common/tls"
 	sHttp "github.com/sagernet/sing/protocol/http"
-	"github.com/sagernet/websocket"
+	"github.com/sagernet/ws"
 )
 
 var _ adapter.V2RayServerTransport = (*Server)(nil)
@@ -34,6 +33,7 @@ type Server struct {
 	path                string
 	maxEarlyData        uint32
 	earlyDataHeaderName string
+	upgrader            ws.HTTPUpgrader
 }
 
 func NewServer(ctx context.Context, options option.V2RayWebsocketOptions, tlsConfig tls.ServerConfig, handler adapter.V2RayServerTransportHandler) (*Server, error) {
@@ -44,6 +44,10 @@ func NewServer(ctx context.Context, options option.V2RayWebsocketOptions, tlsCon
 		path:                options.Path,
 		maxEarlyData:        options.MaxEarlyData,
 		earlyDataHeaderName: options.EarlyDataHeaderName,
+		upgrader: ws.HTTPUpgrader{
+			Timeout: C.TCPTimeout,
+			Header:  options.Headers.Build(),
+		},
 	}
 	if !strings.HasPrefix(server.path, "/") {
 		server.path = "/" + server.path
@@ -59,17 +63,10 @@ func NewServer(ctx context.Context, options option.V2RayWebsocketOptions, tlsCon
 	return server, nil
 }
 
-var upgrader = websocket.Upgrader{
-	HandshakeTimeout: C.TCPTimeout,
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
-}
-
 func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if s.maxEarlyData == 0 || s.earlyDataHeaderName != "" {
 		if request.URL.Path != s.path {
-			s.fallbackRequest(request.Context(), writer, request, http.StatusNotFound, E.New("bad path: ", request.URL.Path))
+			s.invalidRequest(writer, request, http.StatusNotFound, E.New("bad path: ", request.URL.Path))
 			return
 		}
 	}
@@ -83,45 +80,42 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			earlyDataStr := request.URL.RequestURI()[len(s.path):]
 			earlyData, err = base64.RawURLEncoding.DecodeString(earlyDataStr)
 		} else {
-			s.fallbackRequest(request.Context(), writer, request, http.StatusNotFound, E.New("bad path: ", request.URL.Path))
+			s.invalidRequest(writer, request, http.StatusNotFound, E.New("bad path: ", request.URL.Path))
 			return
 		}
 	} else {
+		if request.URL.Path != s.path {
+			s.invalidRequest(writer, request, http.StatusNotFound, E.New("bad path: ", request.URL.Path))
+			return
+		}
 		earlyDataStr := request.Header.Get(s.earlyDataHeaderName)
 		if earlyDataStr != "" {
 			earlyData, err = base64.RawURLEncoding.DecodeString(earlyDataStr)
 		}
 	}
 	if err != nil {
-		s.fallbackRequest(request.Context(), writer, request, http.StatusBadRequest, E.Cause(err, "decode early data"))
+		s.invalidRequest(writer, request, http.StatusBadRequest, E.Cause(err, "decode early data"))
 		return
 	}
-	wsConn, err := upgrader.Upgrade(writer, request, nil)
+	wsConn, _, _, err := ws.UpgradeHTTP(request, writer)
 	if err != nil {
-		s.fallbackRequest(request.Context(), writer, request, 0, E.Cause(err, "upgrade websocket connection"))
+		s.invalidRequest(writer, request, 0, E.Cause(err, "upgrade websocket connection"))
 		return
 	}
 	var metadata M.Metadata
 	metadata.Source = sHttp.SourceAddress(request)
-	conn = NewServerConn(wsConn, metadata.Source.TCPAddr())
+	conn = NewConn(wsConn, metadata.Source.TCPAddr(), ws.StateServerSide)
 	if len(earlyData) > 0 {
 		conn = bufio.NewCachedConn(conn, buf.As(earlyData))
 	}
 	s.handler.NewConnection(request.Context(), conn, metadata)
 }
 
-func (s *Server) fallbackRequest(ctx context.Context, writer http.ResponseWriter, request *http.Request, statusCode int, err error) {
-	conn := v2rayhttp.NewHTTPConn(request.Body, writer)
-	fErr := s.handler.FallbackConnection(ctx, &conn, M.Metadata{})
-	if fErr == nil {
-		return
-	} else if fErr == os.ErrInvalid {
-		fErr = nil
-	}
+func (s *Server) invalidRequest(writer http.ResponseWriter, request *http.Request, statusCode int, err error) {
 	if statusCode > 0 {
 		writer.WriteHeader(statusCode)
 	}
-	s.handler.NewError(request.Context(), E.Cause(E.Errors(err, E.Cause(fErr, "fallback connection")), "process connection from ", request.RemoteAddr))
+	s.handler.NewError(request.Context(), E.Cause(err, "process connection from ", request.RemoteAddr))
 }
 
 func (s *Server) Network() []string {

@@ -66,16 +66,21 @@ func NewTor(ctx context.Context, router adapter.Router, logger log.ContextLogger
 		}
 		startConf.TorrcFile = torrcFile
 	}
+	outboundDialer, err := dialer.New(router, options.DialerOptions)
+	if err != nil {
+		return nil, err
+	}
 	return &Tor{
 		myOutboundAdapter: myOutboundAdapter{
-			protocol: C.TypeTor,
-			network:  []string{N.NetworkTCP},
-			router:   router,
-			logger:   logger,
-			tag:      tag,
+			protocol:     C.TypeTor,
+			network:      []string{N.NetworkTCP},
+			router:       router,
+			logger:       logger,
+			tag:          tag,
+			dependencies: withDialerDependency(options.DialerOptions),
 		},
 		ctx:       ctx,
-		proxy:     NewProxyListener(ctx, logger, dialer.New(router, options.DialerOptions)),
+		proxy:     NewProxyListener(ctx, logger, outboundDialer),
 		startConf: &startConf,
 		options:   options.Options,
 	}, nil

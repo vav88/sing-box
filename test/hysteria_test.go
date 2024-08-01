@@ -35,11 +35,13 @@ func TestHysteriaSelf(t *testing.T) {
 						AuthString: "password",
 					}},
 					Obfs: "fuck me till the daylight",
-					TLS: &option.InboundTLSOptions{
-						Enabled:         true,
-						ServerName:      "example.org",
-						CertificatePath: certPem,
-						KeyPath:         keyPem,
+					InboundTLSOptionsContainer: option.InboundTLSOptionsContainer{
+						TLS: &option.InboundTLSOptions{
+							Enabled:         true,
+							ServerName:      "example.org",
+							CertificatePath: certPem,
+							KeyPath:         keyPem,
+						},
 					},
 				},
 			},
@@ -60,10 +62,12 @@ func TestHysteriaSelf(t *testing.T) {
 					DownMbps:   100,
 					AuthString: "password",
 					Obfs:       "fuck me till the daylight",
-					TLS: &option.OutboundTLSOptions{
-						Enabled:         true,
-						ServerName:      "example.org",
-						CertificatePath: certPem,
+					OutboundTLSOptionsContainer: option.OutboundTLSOptionsContainer{
+						TLS: &option.OutboundTLSOptions{
+							Enabled:         true,
+							ServerName:      "example.org",
+							CertificatePath: certPem,
+						},
 					},
 				},
 			},
@@ -79,7 +83,7 @@ func TestHysteriaSelf(t *testing.T) {
 			},
 		},
 	})
-	testSuitSimple1(t, clientPort, testPort)
+	testSuit(t, clientPort, testPort)
 }
 
 func TestHysteriaInbound(t *testing.T) {
@@ -99,11 +103,13 @@ func TestHysteriaInbound(t *testing.T) {
 						AuthString: "password",
 					}},
 					Obfs: "fuck me till the daylight",
-					TLS: &option.InboundTLSOptions{
-						Enabled:         true,
-						ServerName:      "example.org",
-						CertificatePath: certPem,
-						KeyPath:         keyPem,
+					InboundTLSOptionsContainer: option.InboundTLSOptionsContainer{
+						TLS: &option.InboundTLSOptions{
+							Enabled:         true,
+							ServerName:      "example.org",
+							CertificatePath: certPem,
+							KeyPath:         keyPem,
+						},
 					},
 				},
 			},
@@ -118,14 +124,14 @@ func TestHysteriaInbound(t *testing.T) {
 			caPem:                  "/etc/hysteria/ca.pem",
 		},
 	})
-	testSuitSimple1(t, clientPort, testPort)
+	testSuit(t, clientPort, testPort)
 }
 
 func TestHysteriaOutbound(t *testing.T) {
 	_, certPem, keyPem := createSelfSignedCertificate(t, "example.org")
 	startDockerContainer(t, DockerOptions{
 		Image: ImageHysteria,
-		Ports: []uint16{serverPort, testPort},
+		Ports: []uint16{testPort},
 		Cmd:   []string{"-c", "/etc/hysteria/config.json", "server"},
 		Bind: map[string]string{
 			"hysteria-server.json": "/etc/hysteria/config.json",
@@ -157,10 +163,12 @@ func TestHysteriaOutbound(t *testing.T) {
 					DownMbps:   100,
 					AuthString: "password",
 					Obfs:       "fuck me till the daylight",
-					TLS: &option.OutboundTLSOptions{
-						Enabled:         true,
-						ServerName:      "example.org",
-						CertificatePath: certPem,
+					OutboundTLSOptionsContainer: option.OutboundTLSOptionsContainer{
+						TLS: &option.OutboundTLSOptions{
+							Enabled:         true,
+							ServerName:      "example.org",
+							CertificatePath: certPem,
+						},
 					},
 				},
 			},

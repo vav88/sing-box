@@ -1,5 +1,11 @@
 # 路由
 
+!!! quote "sing-box 1.8.0 中的更改"
+
+    :material-plus: [rule_set](#rule_set)  
+    :material-delete-clock: [geoip](#geoip)  
+    :material-delete-clock: [geosite](#geosite)
+
 ### 结构
 
 ```json
@@ -8,6 +14,7 @@
     "geoip": {},
     "geosite": {},
     "rules": [],
+    "rule_set": [],
     "final": "",
     "auto_detect_interface": false,
     "override_android_vpn": false,
@@ -19,19 +26,28 @@
 
 ### 字段
 
-| 键         | 格式                   |
-|-----------|----------------------|
-| `geoip`   | [GeoIP](./geoip)     |
-| `geosite` | [GeoSite](./geosite) |
-| `rules`   | 一组 [路由规则](./rule)    |
+| 键         | 格式                    |
+|-----------|-----------------------|
+| `geoip`   | [GeoIP](./geoip/)     |
+| `geosite` | [Geosite](./geosite/) |
+
+#### rule
+
+一组 [路由规则](./rule/)    。
+
+#### rule_set
+
+!!! question "自 sing-box 1.8.0 起"
+
+一组 [规则集](/configuration/rule-set/)。
 
 #### final
 
-默认出站标签。如果未空，将使用第一个可用于对应协议的出站。
+默认出站标签。如果为空，将使用第一个可用于对应协议的出站。
 
 #### auto_detect_interface
 
-!!! error ""
+!!! quote ""
 
     仅支持 Linux、Windows 和 macOS。
 
@@ -41,7 +57,7 @@
 
 #### override_android_vpn
 
-!!! error ""
+!!! quote ""
 
     仅支持 Android。
 
@@ -49,7 +65,7 @@
 
 #### default_interface
 
-!!! error ""
+!!! quote ""
 
     仅支持 Linux、Windows 和 macOS。
 
@@ -59,7 +75,7 @@
 
 #### default_mark
 
-!!! error ""
+!!! quote ""
 
     仅支持 Linux。
 

@@ -5,8 +5,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
-	_ "github.com/sagernet/gomobile/event/key"
+	_ "github.com/sagernet/gomobile"
 	"github.com/sagernet/sing-box/cmd/internal/build_shared"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing/common/rw"
@@ -38,18 +39,24 @@ func main() {
 var (
 	sharedFlags []string
 	debugFlags  []string
+	sharedTags  []string
+	iosTags     []string
+	debugTags   []string
 )
 
 func init() {
 	sharedFlags = append(sharedFlags, "-trimpath")
-	sharedFlags = append(sharedFlags, "-ldflags")
-
+	sharedFlags = append(sharedFlags, "-buildvcs=false")
 	currentTag, err := build_shared.ReadTag()
 	if err != nil {
 		currentTag = "unknown"
 	}
-	sharedFlags = append(sharedFlags, "-X github.com/sagernet/sing-box/constant.Version="+currentTag+" -s -w -buildid=")
-	debugFlags = append(debugFlags, "-X github.com/sagernet/sing-box/constant.Version="+currentTag)
+	sharedFlags = append(sharedFlags, "-ldflags", "-X github.com/sagernet/sing-box/constant.Version="+currentTag+" -s -w -buildid=")
+	debugFlags = append(debugFlags, "-ldflags", "-X github.com/sagernet/sing-box/constant.Version="+currentTag)
+
+	sharedTags = append(sharedTags, "with_gvisor", "with_quic", "with_wireguard", "with_ech", "with_utls", "with_clash_api")
+	iosTags = append(iosTags, "with_dhcp", "with_low_memory", "with_conntrack")
+	debugTags = append(debugTags, "debug")
 }
 
 func buildAndroid() {
@@ -70,9 +77,9 @@ func buildAndroid() {
 
 	args = append(args, "-tags")
 	if !debugEnabled {
-		args = append(args, "with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api")
+		args = append(args, strings.Join(sharedTags, ","))
 	} else {
-		args = append(args, "with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,debug")
+		args = append(args, strings.Join(append(sharedTags, debugTags...), ","))
 	}
 	args = append(args, "./experimental/libbox")
 
@@ -100,7 +107,7 @@ func buildiOS() {
 	args := []string{
 		"bind",
 		"-v",
-		"-target", "ios,iossimulator,macos",
+		"-target", "ios,iossimulator,tvos,tvossimulator,macos",
 		"-libname=box",
 	}
 	if !debugEnabled {
@@ -109,11 +116,12 @@ func buildiOS() {
 		args = append(args, debugFlags...)
 	}
 
+	tags := append(sharedTags, iosTags...)
 	args = append(args, "-tags")
 	if !debugEnabled {
-		args = append(args, "with_gvisor,with_quic,with_utls,with_clash_api,with_low_memory,with_conntrack")
+		args = append(args, strings.Join(tags, ","))
 	} else {
-		args = append(args, "with_gvisor,with_quic,with_utls,with_clash_api,with_low_memory,with_conntrack,debug")
+		args = append(args, strings.Join(append(tags, debugTags...), ","))
 	}
 	args = append(args, "./experimental/libbox")
 
@@ -125,7 +133,7 @@ func buildiOS() {
 		log.Fatal(err)
 	}
 
-	copyPath := filepath.Join("..", "sing-box-for-ios")
+	copyPath := filepath.Join("..", "sing-box-for-apple")
 	if rw.FileExists(copyPath) {
 		targetDir := filepath.Join(copyPath, "Libbox.xcframework")
 		targetDir, _ = filepath.Abs(targetDir)

@@ -16,14 +16,16 @@ import (
 
 type ResolveDialer struct {
 	dialer        N.Dialer
+	parallel      bool
 	router        adapter.Router
 	strategy      dns.DomainStrategy
 	fallbackDelay time.Duration
 }
 
-func NewResolveDialer(router adapter.Router, dialer N.Dialer, strategy dns.DomainStrategy, fallbackDelay time.Duration) *ResolveDialer {
+func NewResolveDialer(router adapter.Router, dialer N.Dialer, parallel bool, strategy dns.DomainStrategy, fallbackDelay time.Duration) *ResolveDialer {
 	return &ResolveDialer{
 		dialer,
+		parallel,
 		router,
 		strategy,
 		fallbackDelay,
@@ -34,7 +36,7 @@ func (d *ResolveDialer) DialContext(ctx context.Context, network string, destina
 	if !destination.IsFqdn() {
 		return d.dialer.DialContext(ctx, network, destination)
 	}
-	ctx, metadata := adapter.AppendContext(ctx)
+	ctx, metadata := adapter.ExtendContext(ctx)
 	ctx = log.ContextWithOverrideLevel(ctx, log.LevelDebug)
 	metadata.Destination = destination
 	metadata.Domain = ""
@@ -48,14 +50,18 @@ func (d *ResolveDialer) DialContext(ctx context.Context, network string, destina
 	if err != nil {
 		return nil, err
 	}
-	return N.DialParallel(ctx, d.dialer, network, destination, addresses, d.strategy == dns.DomainStrategyPreferIPv6, d.fallbackDelay)
+	if d.parallel {
+		return N.DialParallel(ctx, d.dialer, network, destination, addresses, d.strategy == dns.DomainStrategyPreferIPv6, d.fallbackDelay)
+	} else {
+		return N.DialSerial(ctx, d.dialer, network, destination, addresses)
+	}
 }
 
 func (d *ResolveDialer) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
 	if !destination.IsFqdn() {
 		return d.dialer.ListenPacket(ctx, destination)
 	}
-	ctx, metadata := adapter.AppendContext(ctx)
+	ctx, metadata := adapter.ExtendContext(ctx)
 	ctx = log.ContextWithOverrideLevel(ctx, log.LevelDebug)
 	metadata.Destination = destination
 	metadata.Domain = ""

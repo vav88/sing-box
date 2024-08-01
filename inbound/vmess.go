@@ -6,7 +6,9 @@ import (
 	"os"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/mux"
 	"github.com/sagernet/sing-box/common/tls"
+	"github.com/sagernet/sing-box/common/uot"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
@@ -19,6 +21,7 @@ import (
 	F "github.com/sagernet/sing/common/format"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
+	"github.com/sagernet/sing/common/ntp"
 )
 
 var (
@@ -41,7 +44,7 @@ func NewVMess(ctx context.Context, router adapter.Router, logger log.ContextLogg
 			protocol:      C.TypeVMess,
 			network:       []string{N.NetworkTCP},
 			ctx:           ctx,
-			router:        router,
+			router:        uot.NewRouter(router, logger),
 			logger:        logger,
 			tag:           tag,
 			listenOptions: options.ListenOptions,
@@ -49,8 +52,13 @@ func NewVMess(ctx context.Context, router adapter.Router, logger log.ContextLogg
 		ctx:   ctx,
 		users: options.Users,
 	}
+	var err error
+	inbound.router, err = mux.NewRouterWithOptions(inbound.router, logger, common.PtrValueOrDefault(options.Multiplex))
+	if err != nil {
+		return nil, err
+	}
 	var serviceOptions []vmess.ServiceOption
-	if timeFunc := router.TimeFunc(); timeFunc != nil {
+	if timeFunc := ntp.TimeFuncFromContext(ctx); timeFunc != nil {
 		serviceOptions = append(serviceOptions, vmess.ServiceWithTimeFunc(timeFunc))
 	}
 	if options.Transport != nil && options.Transport.Type != "" {
@@ -58,7 +66,7 @@ func NewVMess(ctx context.Context, router adapter.Router, logger log.ContextLogg
 	}
 	service := vmess.NewService[int](adapter.NewUpstreamContextHandler(inbound.newConnection, inbound.newPacketConnection, inbound), serviceOptions...)
 	inbound.service = service
-	err := service.UpdateUsers(common.MapIndexed(options.Users, func(index int, it option.VMessUser) int {
+	err = service.UpdateUsers(common.MapIndexed(options.Users, func(index int, it option.VMessUser) int {
 		return index
 	}), common.Map(options.Users, func(it option.VMessUser) string {
 		return it.UUID
@@ -69,7 +77,7 @@ func NewVMess(ctx context.Context, router adapter.Router, logger log.ContextLogg
 		return nil, err
 	}
 	if options.TLS != nil {
-		inbound.tlsConfig, err = tls.NewServer(ctx, router, logger, common.PtrValueOrDefault(options.TLS))
+		inbound.tlsConfig, err = tls.NewServer(ctx, logger, common.PtrValueOrDefault(options.TLS))
 		if err != nil {
 			return nil, err
 		}
@@ -196,8 +204,4 @@ func (t *vmessTransportHandler) NewConnection(ctx context.Context, conn net.Conn
 		Source:      metadata.Source,
 		Destination: metadata.Destination,
 	})
-}
-
-func (t *vmessTransportHandler) FallbackConnection(ctx context.Context, conn net.Conn, metadata M.Metadata) error {
-	return os.ErrInvalid
 }

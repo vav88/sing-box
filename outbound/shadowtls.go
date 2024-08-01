@@ -27,11 +27,12 @@ type ShadowTLS struct {
 func NewShadowTLS(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.ShadowTLSOutboundOptions) (*ShadowTLS, error) {
 	outbound := &ShadowTLS{
 		myOutboundAdapter: myOutboundAdapter{
-			protocol: C.TypeShadowTLS,
-			network:  []string{N.NetworkTCP},
-			router:   router,
-			logger:   logger,
-			tag:      tag,
+			protocol:     C.TypeShadowTLS,
+			network:      []string{N.NetworkTCP},
+			router:       router,
+			logger:       logger,
+			tag:          tag,
+			dependencies: withDialerDependency(options.DialerOptions),
 		},
 	}
 	if options.TLS == nil || !options.TLS.Enabled {
@@ -46,7 +47,7 @@ func NewShadowTLS(ctx context.Context, router adapter.Router, logger log.Context
 		options.TLS.MinVersion = "1.2"
 		options.TLS.MaxVersion = "1.2"
 	}
-	tlsConfig, err := tls.NewClient(router, options.Server, common.PtrValueOrDefault(options.TLS))
+	tlsConfig, err := tls.NewClient(ctx, options.Server, common.PtrValueOrDefault(options.TLS))
 	if err != nil {
 		return nil, err
 	}
@@ -71,11 +72,15 @@ func NewShadowTLS(ctx context.Context, router adapter.Router, logger log.Context
 			tlsHandshakeFunc = shadowtls.DefaultTLSHandshakeFunc(options.Password, stdTLSConfig)
 		}
 	}
+	outboundDialer, err := dialer.New(router, options.DialerOptions)
+	if err != nil {
+		return nil, err
+	}
 	client, err := shadowtls.NewClient(shadowtls.ClientConfig{
 		Version:      options.Version,
 		Password:     options.Password,
 		Server:       options.ServerOptions.Build(),
-		Dialer:       dialer.New(router, options.DialerOptions),
+		Dialer:       outboundDialer,
 		TLSHandshake: tlsHandshakeFunc,
 		Logger:       logger,
 	})

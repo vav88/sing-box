@@ -6,38 +6,46 @@ import (
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
-	"github.com/sagernet/sing-box/common/dialer/conntrack"
+	"github.com/sagernet/sing-box/common/conntrack"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common/control"
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
-	"github.com/sagernet/tfo-go"
 )
 
+var _ WireGuardListener = (*DefaultDialer)(nil)
+
 type DefaultDialer struct {
-	dialer4     tfo.Dialer
-	dialer6     tfo.Dialer
-	udpDialer4  net.Dialer
-	udpDialer6  net.Dialer
-	udpListener net.ListenConfig
-	udpAddr4    string
-	udpAddr6    string
+	dialer4             tcpDialer
+	dialer6             tcpDialer
+	udpDialer4          net.Dialer
+	udpDialer6          net.Dialer
+	udpListener         net.ListenConfig
+	udpAddr4            string
+	udpAddr6            string
+	isWireGuardListener bool
 }
 
-func NewDefault(router adapter.Router, options option.DialerOptions) *DefaultDialer {
+func NewDefault(router adapter.Router, options option.DialerOptions) (*DefaultDialer, error) {
 	var dialer net.Dialer
 	var listener net.ListenConfig
 	if options.BindInterface != "" {
-		bindFunc := control.BindToInterface(router.InterfaceFinder(), options.BindInterface, -1)
+		var interfaceFinder control.InterfaceFinder
+		if router != nil {
+			interfaceFinder = router.InterfaceFinder()
+		} else {
+			interfaceFinder = control.NewDefaultInterfaceFinder()
+		}
+		bindFunc := control.BindToInterface(interfaceFinder, options.BindInterface, -1)
 		dialer.Control = control.Append(dialer.Control, bindFunc)
 		listener.Control = control.Append(listener.Control, bindFunc)
-	} else if router.AutoDetectInterface() {
+	} else if router != nil && router.AutoDetectInterface() {
 		bindFunc := router.AutoDetectInterfaceFunc()
 		dialer.Control = control.Append(dialer.Control, bindFunc)
 		listener.Control = control.Append(listener.Control, bindFunc)
-	} else if router.DefaultInterface() != "" {
+	} else if router != nil && router.DefaultInterface() != "" {
 		bindFunc := control.BindToInterface(router.InterfaceFinder(), router.DefaultInterface(), -1)
 		dialer.Control = control.Append(dialer.Control, bindFunc)
 		listener.Control = control.Append(listener.Control, bindFunc)
@@ -45,7 +53,7 @@ func NewDefault(router adapter.Router, options option.DialerOptions) *DefaultDia
 	if options.RoutingMark != 0 {
 		dialer.Control = control.Append(dialer.Control, control.RoutingMark(options.RoutingMark))
 		listener.Control = control.Append(listener.Control, control.RoutingMark(options.RoutingMark))
-	} else if router.DefaultMark() != 0 {
+	} else if router != nil && router.DefaultMark() != 0 {
 		dialer.Control = control.Append(dialer.Control, control.RoutingMark(router.DefaultMark()))
 		listener.Control = control.Append(listener.Control, control.RoutingMark(router.DefaultMark()))
 	}
@@ -61,6 +69,9 @@ func NewDefault(router adapter.Router, options option.DialerOptions) *DefaultDia
 	} else {
 		dialer.Timeout = C.TCPTimeout
 	}
+	// TODO: Add an option to customize the keep alive period
+	dialer.KeepAlive = C.TCPKeepAliveInitial
+	dialer.Control = control.Append(dialer.Control, control.SetKeepAlivePeriod(C.TCPKeepAliveInitial, C.TCPKeepAliveInterval))
 	var udpFragment bool
 	if options.UDPFragment != nil {
 		udpFragment = *options.UDPFragment
@@ -93,15 +104,35 @@ func NewDefault(router adapter.Router, options option.DialerOptions) *DefaultDia
 		udpDialer6.LocalAddr = &net.UDPAddr{IP: bindAddr.AsSlice()}
 		udpAddr6 = M.SocksaddrFrom(bindAddr, 0).String()
 	}
+	if options.TCPMultiPath {
+		if !go121Available {
+			return nil, E.New("MultiPath TCP requires go1.21, please recompile your binary.")
+		}
+		setMultiPathTCP(&dialer4)
+	}
+	if options.IsWireGuardListener {
+		for _, controlFn := range wgControlFns {
+			listener.Control = control.Append(listener.Control, controlFn)
+		}
+	}
+	tcpDialer4, err := newTCPDialer(dialer4, options.TCPFastOpen)
+	if err != nil {
+		return nil, err
+	}
+	tcpDialer6, err := newTCPDialer(dialer6, options.TCPFastOpen)
+	if err != nil {
+		return nil, err
+	}
 	return &DefaultDialer{
-		tfo.Dialer{Dialer: dialer4, DisableTFO: !options.TCPFastOpen},
-		tfo.Dialer{Dialer: dialer6, DisableTFO: !options.TCPFastOpen},
+		tcpDialer4,
+		tcpDialer6,
 		udpDialer4,
 		udpDialer6,
 		listener,
 		udpAddr4,
 		udpAddr6,
-	}
+		options.IsWireGuardListener,
+	}, nil
 }
 
 func (d *DefaultDialer) DialContext(ctx context.Context, network string, address M.Socksaddr) (net.Conn, error) {
@@ -124,11 +155,17 @@ func (d *DefaultDialer) DialContext(ctx context.Context, network string, address
 }
 
 func (d *DefaultDialer) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
-	if !destination.IsIPv6() {
-		return trackPacketConn(d.udpListener.ListenPacket(ctx, N.NetworkUDP, d.udpAddr4))
-	} else {
+	if destination.IsIPv6() {
 		return trackPacketConn(d.udpListener.ListenPacket(ctx, N.NetworkUDP, d.udpAddr6))
+	} else if destination.IsIPv4() && !destination.Addr.IsUnspecified() {
+		return trackPacketConn(d.udpListener.ListenPacket(ctx, N.NetworkUDP+"4", d.udpAddr4))
+	} else {
+		return trackPacketConn(d.udpListener.ListenPacket(ctx, N.NetworkUDP, d.udpAddr4))
 	}
+}
+
+func (d *DefaultDialer) ListenPacketCompat(network, address string) (net.PacketConn, error) {
+	return trackPacketConn(d.udpListener.ListenPacket(context.Background(), network, address))
 }
 
 func trackConn(conn net.Conn, err error) (net.Conn, error) {

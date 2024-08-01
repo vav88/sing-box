@@ -1,3 +1,11 @@
+---
+icon: material/new-box
+---
+
+!!! quote "sing-box 1.9.0 中的更改"
+
+    :material-plus: [client_subnet](#client_subnet)
+
 ### 结构
 
 ```json
@@ -5,17 +13,17 @@
   "dns": {
     "servers": [
       {
-        "tag": "google",
-        "address": "tls://dns.google",
-        "address_resolver": "local",
-        "address_strategy": "prefer_ipv4",
-        "strategy": "ipv4_only",
-        "detour": "direct"
+        "tag": "",
+        "address": "",
+        "address_resolver": "",
+        "address_strategy": "",
+        "strategy": "",
+        "detour": "",
+        "client_subnet": ""
       }
     ]
   }
 }
-
 ```
 
 ### 字段
@@ -30,33 +38,26 @@ DNS 服务器的标签。
 
 DNS 服务器的地址。
 
-| 协议       | 格式                           |
-|----------|------------------------------|
-| `System` | `local`                      |
-| `TCP`    | `tcp://1.0.0.1`              |
-| `UDP`    | `8.8.8.8` `udp://8.8.4.4`    |
-| `TLS`    | `tls://dns.google`           |
-| `HTTPS`  | `https://1.1.1.1/dns-query`  |
-| `QUIC`   | `quic://dns.adguard.com`     |
-| `HTTP3`  | `h3://8.8.8.8/dns-query`     |
-| `RCode`  | `rcode://refused`            |
-| `DHCP`   | `dhcp://auto` 或 `dhcp://en0` |
+| 协议                                   | 格式                           |
+|--------------------------------------|------------------------------|
+| `System`                             | `local`                      |
+| `TCP`                                | `tcp://1.0.0.1`              |
+| `UDP`                                | `8.8.8.8` `udp://8.8.4.4`    |
+| `TLS`                                | `tls://dns.google`           |
+| `HTTPS`                              | `https://1.1.1.1/dns-query`  |
+| `QUIC`                               | `quic://dns.adguard.com`     |
+| `HTTP3`                              | `h3://8.8.8.8/dns-query`     |
+| `RCode`                              | `rcode://refused`            |
+| `DHCP`                               | `dhcp://auto` 或 `dhcp://en0` |
+| [FakeIP](/configuration/dns/fakeip/) | `fakeip`                     |
 
 !!! warning ""
 
-    为了确保系统 DNS 生效，而不是 Go 的内置默认解析器，请在编译时启用 CGO。
-
-!!! warning ""
-
-    默认安装不包含 QUIC 和 HTTP3 传输层，请参阅 [安装](/zh/#_2)。
+    为了确保 Android 系统 DNS 生效，而不是 Go 的内置默认解析器，请在编译时启用 CGO。
 
 !!! info ""
 
     RCode 传输层传输层常用于屏蔽请求. 与 DNS 规则和 `disable_cache` 规则选项一起使用。
-
-!!! warning ""
-
-    默认安装不包含 DHCP 传输层，请参阅 [安装](/zh/#_2)。
 
 | RCode             | 描述       | 
 |-------------------|----------|
@@ -94,3 +95,15 @@ DNS 服务器的地址。
 用于连接到 DNS 服务器的出站的标签。
 
 如果为空，将使用默认出站。
+
+#### client_subnet
+
+!!! question "自 sing-box 1.9.0 起"
+
+默认情况下，将带有指定 IP 前缀的 `edns0-subnet` OPT 附加记录附加到每个查询。
+
+如果值是 IP 地址而不是前缀，则会自动附加 `/32` 或 `/128`。
+
+可以被 `rules.[].client_subnet` 覆盖。
+
+将覆盖 `dns.client_subnet`。

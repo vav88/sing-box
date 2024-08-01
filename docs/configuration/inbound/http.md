@@ -20,7 +20,7 @@
 
 ### Listen Fields
 
-See [Listen Fields](/configuration/shared/listen) for details.
+See [Listen Fields](/configuration/shared/listen/) for details.
 
 ### Fields
 
@@ -36,12 +36,12 @@ No authentication required if empty.
 
 #### set_system_proxy
 
-!!! error ""
+!!! quote ""
 
     Only supported on Linux, Android, Windows, and macOS.
 
 !!! warning ""
 
-    To work on Android and iOS without privileges, use tun.platform.http_proxy instead.
+    To work on Android and Apple platforms without privileges, use tun.platform.http_proxy instead.
 
 Automatically set system proxy configuration when start and clean up when stop.

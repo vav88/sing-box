@@ -1,4 +1,18 @@
-!!! error ""
+---
+icon: material/new-box
+---
+
+!!! quote "Changes in sing-box 1.9.0"
+
+    :material-plus: [platform.http_proxy.bypass_domain](#platformhttp_proxybypass_domain)  
+    :material-plus: [platform.http_proxy.match_domain](#platformhttp_proxymatch_domain)  
+
+!!! quote "Changes in sing-box 1.8.0"
+
+    :material-plus: [gso](#gso)  
+    :material-alert-decagram: [stack](#stack)
+
+!!! quote ""
 
     Only supported on Linux, Windows and macOS.
 
@@ -12,6 +26,7 @@
   "inet4_address": "172.19.0.1/30",
   "inet6_address": "fdfe:dcba:9876::1/126",
   "mtu": 9000,
+  "gso": false,
   "auto_route": true,
   "strict_route": true,
   "inet4_route_address": [
@@ -22,8 +37,21 @@
     "::/1",
     "8000::/1"
   ],
+  "inet4_route_exclude_address": [
+    "192.168.0.0/16"
+  ],
+  "inet6_route_exclude_address": [
+    "fc00::/7"
+  ],
   "endpoint_independent_nat": false,
+  "udp_timeout": "5m",
   "stack": "system",
+  "include_interface": [
+    "lan0"
+  ],
+  "exclude_interface": [
+    "lan1"
+  ],
   "include_uid": [
     0
   ],
@@ -50,7 +78,9 @@
     "http_proxy": {
       "enabled": false,
       "server": "127.0.0.1",
-      "server_port": 8080
+      "server_port": 8080,
+      "bypass_domain": [],
+      "match_domain": []
     }
   },
   
@@ -86,11 +116,21 @@ IPv6 prefix for the tun interface.
 
 The maximum transmission unit.
 
+#### gso
+
+!!! question "Since sing-box 1.8.0"
+
+!!! quote ""
+
+    Only supported on Linux.
+
+Enable generic segmentation offload.
+
 #### auto_route
 
 Set the default route to the Tun.
 
-!!! error ""
+!!! quote ""
 
     To avoid traffic loopback, set `route.auto_detect_interface` or `route.default_interface` or `outbound.bind_interface`
 
@@ -107,7 +147,7 @@ Enforce strict routing rules when `auto_route` is enabled:
 * Let unsupported network unreachable
 * Route all connections to tun
 
-It prevents address leaks and makes DNS hijacking work on Android, but your device will not be accessible by others.
+It prevents address leaks and makes DNS hijacking work on Android.
 
 *In Windows*:
 
@@ -123,6 +163,14 @@ Use custom routes instead of default when `auto_route` is enabled.
 #### inet6_route_address
 
 Use custom routes instead of default when `auto_route` is enabled.
+
+#### inet4_route_exclude_address
+
+Exclude custom routes when `auto_route` is enabled.
+
+#### inet6_route_exclude_address
+
+Exclude custom routes when `auto_route` is enabled.
 
 #### endpoint_independent_nat
 
@@ -140,21 +188,39 @@ UDP NAT expiration time in seconds, default is 300 (5 minutes).
 
 #### stack
 
+!!! quote "Changes in sing-box 1.8.0"
+
+    :material-delete-alert: The legacy LWIP stack has been deprecated and removed.
+
 TCP/IP stack.
 
-| Stack            | Description                                                                      | Status            |
-|------------------|----------------------------------------------------------------------------------|-------------------|
-| system (default) | Sometimes better performance                                                     | recommended       |
-| gVisor           | Better compatibility, based on [google/gvisor](https://github.com/google/gvisor) | recommended       |
-| LWIP             | Based on [eycorsican/go-tun2socks](https://github.com/eycorsican/go-tun2socks)   | upstream archived |
+| Stack    | Description                                                                                           | 
+|----------|-------------------------------------------------------------------------------------------------------|
+| `system` | Perform L3 to L4 translation using the system network stack                                           |
+| `gvisor` | Perform L3 to L4 translation using [gVisor](https://github.com/google/gvisor)'s virtual network stack |
+| `mixed`  | Mixed `system` TCP stack and `gvisor` UDP stack                                                       |
 
-!!! warning ""
+Defaults to the `mixed` stack if the gVisor build tag is enabled, otherwise defaults to the `system` stack.
 
-    gVisor and LWIP stacks is not included by default, see [Installation](/#installation).
+#### include_interface
+
+!!! quote ""
+
+    Interface rules are only supported on Linux and require auto_route.
+
+Limit interfaces in route. Not limited by default.
+
+Conflict with `exclude_interface`.
+
+#### exclude_interface
+
+Exclude interfaces in route.
+
+Conflict with `include_interface`.
 
 #### include_uid
 
-!!! error ""
+!!! quote ""
 
     UID rules are only supported on Linux and require auto_route.
 
@@ -174,16 +240,16 @@ Exclude users in route, but in range.
 
 #### include_android_user
 
-!!! error ""
+!!! quote ""
 
     Android user and package rules are only supported on Android and require auto_route.
 
 Limit android users in route.
 
-| Common user  | ID  |
-|--------------|-----|
-| Main         | 0   |
-| Work Profile | 10  |
+| Common user  | ID |
+|--------------|----|
+| Main         | 0  |
+| Work Profile | 10 |
 
 #### include_package
 
@@ -201,6 +267,38 @@ Platform-specific settings, provided by client applications.
 
 System HTTP proxy settings.
 
+#### platform.http_proxy.enabled
+
+Enable system HTTP proxy.
+
+#### platform.http_proxy.server
+
+==Required==
+
+HTTP proxy server address.
+
+#### platform.http_proxy.server_port
+
+==Required==
+
+HTTP proxy server port.
+
+#### platform.http_proxy.bypass_domain
+
+!!! note ""
+
+    On Apple platforms, `bypass_domain` items matches hostname **suffixes**.
+
+Hostnames that bypass the HTTP proxy.
+
+#### platform.http_proxy.match_domain
+
+!!! quote ""
+
+    Only supported in graphical clients on Apple platforms.
+
+Hostnames that use the HTTP proxy.
+
 ### Listen Fields
 
-See [Listen Fields](/configuration/shared/listen) for details.
+See [Listen Fields](/configuration/shared/listen/) for details.

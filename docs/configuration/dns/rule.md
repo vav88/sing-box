@@ -1,3 +1,22 @@
+---
+icon: material/new-box
+---
+
+!!! quote "Changes in sing-box 1.9.0"
+
+    :material-plus: [geoip](#geoip)  
+    :material-plus: [ip_cidr](#ip_cidr)  
+    :material-plus: [ip_is_private](#ip_is_private)  
+    :material-plus: [client_subnet](#client_subnet)
+    :material-plus: [rule_set_ipcidr_match_source](#rule_set_ipcidr_match_source)
+
+!!! quote "Changes in sing-box 1.8.0"
+
+    :material-plus: [rule_set](#rule_set)  
+    :material-plus: [source_ip_is_private](#source_ip_is_private)  
+    :material-delete-clock: [geoip](#geoip)  
+    :material-delete-clock: [geosite](#geosite)
+
 ### Structure
 
 ```json
@@ -42,10 +61,19 @@
         "source_geoip": [
           "private"
         ],
+        "geoip": [
+          "cn"
+        ],
         "source_ip_cidr": [
           "10.0.0.0/24",
           "192.168.0.1"
         ],
+        "source_ip_is_private": false,
+        "ip_cidr": [
+          "10.0.0.0/24",
+          "192.168.0.1"
+        ],
+        "ip_is_private": false,
         "source_port": [
           12345
         ],
@@ -79,19 +107,34 @@
           1000
         ],
         "clash_mode": "direct",
+        "wifi_ssid": [
+          "My WIFI"
+        ],
+        "wifi_bssid": [
+          "00:00:00:00:00:00"
+        ],
+        "rule_set": [
+          "geoip-cn",
+          "geosite-cn"
+        ],
+        "rule_set_ipcidr_match_source": false,
         "invert": false,
         "outbound": [
           "direct"
         ],
         "server": "local",
-        "disable_cache": false
+        "disable_cache": false,
+        "rewrite_ttl": 100,
+        "client_subnet": "127.0.0.1/24"
       },
       {
         "type": "logical",
         "mode": "and",
         "rules": [],
         "server": "local",
-        "disable_cache": false
+        "disable_cache": false,
+        "rewrite_ttl": 100,
+        "client_subnet": "127.0.0.1/24"
       }
     ]
   }
@@ -110,13 +153,15 @@
     The default rule uses the following matching logic:  
     (`domain` || `domain_suffix` || `domain_keyword` || `domain_regex` || `geosite`) &&  
     (`port` || `port_range`) &&  
-    (`source_geoip` || `source_ip_cidr`) &&  
+    (`source_geoip` || `source_ip_cidr` ｜｜ `source_ip_is_private`) &&  
     (`source_port` || `source_port_range`) &&  
     `other fields`
 
+    Additionally, included rule sets can be considered merged rather than as a single rule sub-item.
+
 #### inbound
 
-Tags of [Inbound](/configuration/inbound).
+Tags of [Inbound](/configuration/inbound/).
 
 #### ip_version
 
@@ -158,15 +203,29 @@ Match domain using regular expression.
 
 #### geosite
 
+!!! failure "Deprecated in sing-box 1.8.0"
+
+    Geosite is deprecated and may be removed in the future, check [Migration](/migration/#migrate-geosite-to-rule-sets).
+
 Match geosite.
 
 #### source_geoip
+
+!!! failure "Deprecated in sing-box 1.8.0"
+
+    GeoIP is deprecated and may be removed in the future, check [Migration](/migration/#migrate-geoip-to-rule-sets).
 
 Match source geoip.
 
 #### source_ip_cidr
 
-Match source ip cidr.
+Match source IP CIDR.
+
+#### source_ip_is_private
+
+!!! question "Since sing-box 1.8.0"
+
+Match non-public source IP.
 
 #### source_port
 
@@ -186,7 +245,7 @@ Match port range.
 
 #### process_name
 
-!!! error ""
+!!! quote ""
 
     Only supported on Linux, Windows, and macOS.
 
@@ -194,7 +253,7 @@ Match process name.
 
 #### process_path
 
-!!! error ""
+!!! quote ""
 
     Only supported on Linux, Windows, and macOS.
 
@@ -206,7 +265,7 @@ Match android package name.
 
 #### user
 
-!!! error ""
+!!! quote ""
 
     Only supported on Linux.
 
@@ -214,7 +273,7 @@ Match user name.
 
 #### user_id
 
-!!! error ""
+!!! quote ""
 
     Only supported on Linux.
 
@@ -223,6 +282,34 @@ Match user id.
 #### clash_mode
 
 Match Clash mode.
+
+#### wifi_ssid
+
+!!! quote ""
+
+    Only supported in graphical clients on Android and Apple platforms.
+
+Match WiFi SSID.
+
+#### wifi_bssid
+
+!!! quote ""
+
+    Only supported in graphical clients on Android and Apple platforms.
+
+Match WiFi BSSID.
+
+#### rule_set
+
+!!! question "Since sing-box 1.8.0"
+
+Match [Rule Set](/configuration/route/#rule_set).
+
+#### rule_set_ipcidr_match_source
+
+!!! question "Since sing-box 1.9.0"
+
+Make `ipcidr` in rule sets match the source IP.
 
 #### invert
 
@@ -244,6 +331,50 @@ Tag of the target dns server.
 
 Disable cache and save cache in this query.
 
+#### rewrite_ttl
+
+Rewrite TTL in DNS responses.
+
+#### client_subnet
+
+!!! question "Since sing-box 1.9.0"
+
+Append a `edns0-subnet` OPT extra record with the specified IP prefix to every query by default.
+
+If value is an IP address instead of prefix, `/32` or `/128` will be appended automatically.
+
+Will overrides `dns.client_subnet` and `servers.[].client_subnet`.
+
+### Address Filter Fields
+
+Only takes effect for IP address requests. When the query results do not match the address filtering rule items, the current rule will be skipped.
+
+!!! info ""
+
+    `ip_cidr` items in included rule sets also takes effect as an address filtering field.
+
+!!! note ""
+
+    Enable `experimental.cache_file.store_rdrc` to cache results.
+
+#### geoip
+
+!!! question "Since sing-box 1.9.0"
+
+Match GeoIP with query response.
+
+#### ip_cidr
+
+!!! question "Since sing-box 1.9.0"
+
+Match IP CIDR with query response.
+
+#### ip_is_private
+
+!!! question "Since sing-box 1.9.0"
+
+Match private IP with query response.
+
 ### Logical Fields
 
 #### type
@@ -256,4 +387,4 @@ Disable cache and save cache in this query.
 
 #### rules
 
-Included default rules.
+Included rules.

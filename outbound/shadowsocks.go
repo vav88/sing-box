@@ -11,8 +11,7 @@ import (
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/transport/sip003"
-	"github.com/sagernet/sing-shadowsocks"
-	"github.com/sagernet/sing-shadowsocks/shadowimpl"
+	"github.com/sagernet/sing-shadowsocks2"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/bufio"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -30,35 +29,42 @@ type Shadowsocks struct {
 	serverAddr      M.Socksaddr
 	plugin          sip003.Plugin
 	uotClient       *uot.Client
-	multiplexDialer N.Dialer
+	multiplexDialer *mux.Client
 }
 
 func NewShadowsocks(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.ShadowsocksOutboundOptions) (*Shadowsocks, error) {
-	method, err := shadowimpl.FetchMethod(options.Method, options.Password, router.TimeFunc())
+	method, err := shadowsocks.CreateMethod(ctx, options.Method, shadowsocks.MethodOptions{
+		Password: options.Password,
+	})
+	if err != nil {
+		return nil, err
+	}
+	outboundDialer, err := dialer.New(router, options.DialerOptions)
 	if err != nil {
 		return nil, err
 	}
 	outbound := &Shadowsocks{
 		myOutboundAdapter: myOutboundAdapter{
-			protocol: C.TypeShadowsocks,
-			network:  options.Network.Build(),
-			router:   router,
-			logger:   logger,
-			tag:      tag,
+			protocol:     C.TypeShadowsocks,
+			network:      options.Network.Build(),
+			router:       router,
+			logger:       logger,
+			tag:          tag,
+			dependencies: withDialerDependency(options.DialerOptions),
 		},
-		dialer:     dialer.New(router, options.DialerOptions),
+		dialer:     outboundDialer,
 		method:     method,
 		serverAddr: options.ServerOptions.Build(),
 	}
 	if options.Plugin != "" {
-		outbound.plugin, err = sip003.CreatePlugin(options.Plugin, options.PluginOptions, router, outbound.dialer, outbound.serverAddr)
+		outbound.plugin, err = sip003.CreatePlugin(ctx, options.Plugin, options.PluginOptions, router, outbound.dialer, outbound.serverAddr)
 		if err != nil {
 			return nil, err
 		}
 	}
-	uotOptions := common.PtrValueOrDefault(options.UDPOverTCPOptions)
+	uotOptions := common.PtrValueOrDefault(options.UDPOverTCP)
 	if !uotOptions.Enabled {
-		outbound.multiplexDialer, err = mux.NewClientWithOptions(ctx, (*shadowsocksDialer)(outbound), common.PtrValueOrDefault(options.MultiplexOptions))
+		outbound.multiplexDialer, err = mux.NewClientWithOptions((*shadowsocksDialer)(outbound), logger, common.PtrValueOrDefault(options.Multiplex))
 		if err != nil {
 			return nil, err
 		}
@@ -127,8 +133,15 @@ func (h *Shadowsocks) NewPacketConnection(ctx context.Context, conn N.PacketConn
 	return NewPacketConnection(ctx, h, conn, metadata)
 }
 
+func (h *Shadowsocks) InterfaceUpdated() {
+	if h.multiplexDialer != nil {
+		h.multiplexDialer.Reset()
+	}
+	return
+}
+
 func (h *Shadowsocks) Close() error {
-	return common.Close(h.multiplexDialer)
+	return common.Close(common.PtrOrNil(h.multiplexDialer))
 }
 
 var _ N.Dialer = (*shadowsocksDialer)(nil)

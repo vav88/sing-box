@@ -9,25 +9,27 @@ type SocksInboundOptions struct {
 
 type HTTPMixedInboundOptions struct {
 	ListenOptions
-	Users          []auth.User        `json:"users,omitempty"`
-	SetSystemProxy bool               `json:"set_system_proxy,omitempty"`
-	TLS            *InboundTLSOptions `json:"tls,omitempty"`
+	Users          []auth.User `json:"users,omitempty"`
+	SetSystemProxy bool        `json:"set_system_proxy,omitempty"`
+	InboundTLSOptionsContainer
 }
 
 type SocksOutboundOptions struct {
 	DialerOptions
 	ServerOptions
-	Version           string             `json:"version,omitempty"`
-	Username          string             `json:"username,omitempty"`
-	Password          string             `json:"password,omitempty"`
-	Network           NetworkList        `json:"network,omitempty"`
-	UDPOverTCPOptions *UDPOverTCPOptions `json:"udp_over_tcp,omitempty"`
+	Version    string             `json:"version,omitempty"`
+	Username   string             `json:"username,omitempty"`
+	Password   string             `json:"password,omitempty"`
+	Network    NetworkList        `json:"network,omitempty"`
+	UDPOverTCP *UDPOverTCPOptions `json:"udp_over_tcp,omitempty"`
 }
 
 type HTTPOutboundOptions struct {
 	DialerOptions
 	ServerOptions
-	Username string              `json:"username,omitempty"`
-	Password string              `json:"password,omitempty"`
-	TLS      *OutboundTLSOptions `json:"tls,omitempty"`
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
+	OutboundTLSOptionsContainer
+	Path    string     `json:"path,omitempty"`
+	Headers HTTPHeader `json:"headers,omitempty"`
 }

@@ -17,7 +17,7 @@ func HandleMuxConnection(ctx context.Context, conn net.Conn, metadata M.Metadata
 		return err
 	}
 	var group task.Group
-	group.Append0(func(ctx context.Context) error {
+	group.Append0(func(_ context.Context) error {
 		var stream net.Conn
 		for {
 			stream, err = session.AcceptStream()
@@ -53,7 +53,7 @@ func newMuxConnection0(ctx context.Context, stream net.Conn, metadata M.Metadata
 	case CommandTCP:
 		return handler.NewConnection(ctx, stream, metadata)
 	case CommandUDP:
-		return handler.NewPacketConnection(ctx, &PacketConn{stream}, metadata)
+		return handler.NewPacketConnection(ctx, &PacketConn{Conn: stream}, metadata)
 	default:
 		return E.New("unknown command ", command)
 	}

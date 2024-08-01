@@ -15,13 +15,14 @@
     }
   ],
   "tls": {},
+  "multiplex": {},
   "transport": {}
 }
 ```
 
 ### Listen Fields
 
-See [Listen Fields](/configuration/shared/listen) for details.
+See [Listen Fields](/configuration/shared/listen/) for details.
 
 ### Fields
 
@@ -49,6 +50,10 @@ Available values:
 
 TLS configuration, see [TLS](/configuration/shared/tls/#inbound).
 
+#### multiplex
+
+See [Multiplex](/configuration/shared/multiplex#inbound) for details.
+
 #### transport
 
-V2Ray Transport configuration, see [V2Ray Transport](/configuration/shared/v2ray-transport).
+V2Ray Transport configuration, see [V2Ray Transport](/configuration/shared/v2ray-transport/).

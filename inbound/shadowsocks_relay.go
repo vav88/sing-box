@@ -4,8 +4,11 @@ import (
 	"context"
 	"net"
 	"os"
+	"time"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/mux"
+	"github.com/sagernet/sing-box/common/uot"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
@@ -34,7 +37,7 @@ func newShadowsocksRelay(ctx context.Context, router adapter.Router, logger log.
 			protocol:      C.TypeShadowsocks,
 			network:       options.Network.Build(),
 			ctx:           ctx,
-			router:        router,
+			router:        uot.NewRouter(router, logger),
 			logger:        logger,
 			tag:           tag,
 			listenOptions: options.ListenOptions,
@@ -43,16 +46,21 @@ func newShadowsocksRelay(ctx context.Context, router adapter.Router, logger log.
 	}
 	inbound.connHandler = inbound
 	inbound.packetHandler = inbound
-	var udpTimeout int64
+	var err error
+	inbound.router, err = mux.NewRouterWithOptions(inbound.router, logger, common.PtrValueOrDefault(options.Multiplex))
+	if err != nil {
+		return nil, err
+	}
+	var udpTimeout time.Duration
 	if options.UDPTimeout != 0 {
-		udpTimeout = options.UDPTimeout
+		udpTimeout = time.Duration(options.UDPTimeout)
 	} else {
-		udpTimeout = int64(C.UDPTimeout.Seconds())
+		udpTimeout = C.UDPTimeout
 	}
 	service, err := shadowaead_2022.NewRelayServiceWithPassword[int](
 		options.Method,
 		options.Password,
-		udpTimeout,
+		int64(udpTimeout.Seconds()),
 		adapter.NewUpstreamContextHandler(inbound.newConnection, inbound.newPacketConnection, inbound),
 	)
 	if err != nil {

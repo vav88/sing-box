@@ -9,10 +9,13 @@ import (
 	"strings"
 
 	"github.com/sagernet/sing-box/adapter"
+	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
 	E "github.com/sagernet/sing/common/exceptions"
 
 	"github.com/caddyserver/certmagic"
+	"github.com/libdns/alidns"
+	"github.com/libdns/cloudflare"
 	"github.com/mholt/acmez/acme"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -21,6 +24,7 @@ import (
 type acmeWrapper struct {
 	ctx    context.Context
 	cfg    *certmagic.Config
+	cache  *certmagic.Cache
 	domain []string
 }
 
@@ -29,7 +33,7 @@ func (w *acmeWrapper) Start() error {
 }
 
 func (w *acmeWrapper) Close() error {
-	w.cfg.Unmanage(w.domain)
+	w.cache.Stop()
 	return nil
 }
 
@@ -73,14 +77,44 @@ func startACME(ctx context.Context, options option.InboundACMEOptions) (*tls.Con
 		AltTLSALPNPort:          int(options.AlternativeTLSPort),
 		Logger:                  config.Logger,
 	}
+	if dnsOptions := options.DNS01Challenge; dnsOptions != nil && dnsOptions.Provider != "" {
+		var solver certmagic.DNS01Solver
+		switch dnsOptions.Provider {
+		case C.DNSProviderAliDNS:
+			solver.DNSProvider = &alidns.Provider{
+				AccKeyID:     dnsOptions.AliDNSOptions.AccessKeyID,
+				AccKeySecret: dnsOptions.AliDNSOptions.AccessKeySecret,
+				RegionID:     dnsOptions.AliDNSOptions.RegionID,
+			}
+		case C.DNSProviderCloudflare:
+			solver.DNSProvider = &cloudflare.Provider{
+				APIToken: dnsOptions.CloudflareOptions.APIToken,
+			}
+		default:
+			return nil, nil, E.New("unsupported ACME DNS01 provider type: " + dnsOptions.Provider)
+		}
+		acmeConfig.DNS01Solver = &solver
+	}
 	if options.ExternalAccount != nil && options.ExternalAccount.KeyID != "" {
 		acmeConfig.ExternalAccount = (*acme.EAB)(options.ExternalAccount)
 	}
 	config.Issuers = []certmagic.Issuer{certmagic.NewACMEIssuer(config, acmeConfig)}
-	config = certmagic.New(certmagic.NewCache(certmagic.CacheOptions{
+	cache := certmagic.NewCache(certmagic.CacheOptions{
 		GetConfigForCert: func(certificate certmagic.Certificate) (*certmagic.Config, error) {
 			return config, nil
 		},
-	}), *config)
-	return config.TLSConfig(), &acmeWrapper{ctx, config, options.Domain}, nil
+	})
+	config = certmagic.New(cache, *config)
+	var tlsConfig *tls.Config
+	if acmeConfig.DisableTLSALPNChallenge || acmeConfig.DNS01Solver != nil {
+		tlsConfig = &tls.Config{
+			GetCertificate: config.GetCertificate,
+		}
+	} else {
+		tlsConfig = &tls.Config{
+			GetCertificate: config.GetCertificate,
+			NextProtos:     []string{ACMETLS1Protocol},
+		}
+	}
+	return tlsConfig, &acmeWrapper{ctx: ctx, cfg: config, cache: cache, domain: options.Domain}, nil
 }
